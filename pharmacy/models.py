@@ -1101,3 +1101,231 @@ class PharmacyDispensingItem(models.Model):
             f"{self.dispensing.dispensing_number} - "
             f"{self.prescription_item.medicine.name}"
         )
+
+# ============================================================
+# PHARMACY PURCHASE RETURN
+# ============================================================
+
+class PharmacyPurchaseReturn(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "DRAFT", "Draft"
+        PROCESSED = "PROCESSED", "Processed"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    return_number = models.CharField(
+        max_length=40,
+        unique=True,
+        editable=False,
+    )
+
+    purchase = models.ForeignKey(
+        PharmacyPurchase,
+        on_delete=models.PROTECT,
+        related_name="purchase_returns",
+    )
+
+    supplier = models.ForeignKey(
+        Supplier,
+        on_delete=models.PROTECT,
+        related_name="purchase_returns",
+    )
+
+    return_date = models.DateField(default=timezone.localdate)
+
+    reason = models.TextField(blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+
+    stock_reversed = models.BooleanField(
+        default=False,
+        editable=False,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_pharmacy_purchase_returns",
+    )
+
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="processed_pharmacy_purchase_returns",
+    )
+
+    processed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def total_amount(self):
+        return sum(
+            item.total_amount
+            for item in self.items.all()
+        )
+
+    def save(self, *args, **kwargs):
+        if not self.return_number:
+            today = timezone.localdate()
+
+            prefix = f"PR-{today.strftime('%Y%m%d')}-"
+
+            last_return = (
+                PharmacyPurchaseReturn.objects
+                .filter(return_number__startswith=prefix)
+                .order_by("-id")
+                .first()
+            )
+
+            sequence = 1
+
+            if last_return:
+                try:
+                    sequence = (
+                        int(last_return.return_number.split("-")[-1])
+                        + 1
+                    )
+                except (ValueError, IndexError):
+                    sequence = 1
+
+            self.return_number = f"{prefix}{sequence:04d}"
+
+        if self.purchase_id:
+            self.supplier_id = self.purchase.supplier_id
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.return_number
+
+
+class PharmacyPurchaseReturnItem(models.Model):
+    purchase_return = models.ForeignKey(
+        PharmacyPurchaseReturn,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+
+    purchase_item = models.ForeignKey(
+        PharmacyPurchaseItem,
+        on_delete=models.PROTECT,
+        related_name="return_items",
+    )
+
+    medicine = models.ForeignKey(
+        Medicine,
+        on_delete=models.PROTECT,
+        related_name="purchase_return_items",
+    )
+
+    medicine_batch = models.ForeignKey(
+        MedicineBatch,
+        on_delete=models.PROTECT,
+        related_name="purchase_return_items",
+    )
+
+    quantity_returned = models.PositiveIntegerField()
+
+    return_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+    )
+
+    gst_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+    )
+
+    reason = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    stock_reversed = models.BooleanField(
+        default=False,
+        editable=False,
+    )
+
+    @property
+    def subtotal(self):
+        return (
+            self.quantity_returned *
+            self.return_price
+        )
+
+    @property
+    def gst_amount(self):
+        return (
+            self.subtotal *
+            self.gst_rate /
+            Decimal("100")
+        )
+
+    @property
+    def total_amount(self):
+        return self.subtotal + self.gst_amount
+
+    def clean(self):
+        super().clean()
+
+        if self.quantity_returned <= 0:
+            raise ValidationError(
+                "Return quantity must be greater than zero."
+            )
+
+        if self.purchase_item_id and self.medicine_id:
+            if self.purchase_item.medicine_id != self.medicine_id:
+                raise ValidationError(
+                    "Medicine does not match the original purchase item."
+                )
+
+        if self.medicine_batch_id and self.medicine_id:
+            if self.medicine_batch.medicine_id != self.medicine_id:
+                raise ValidationError(
+                    "Selected batch does not belong to this medicine."
+                )
+
+        if self.purchase_item_id and self.medicine_batch_id:
+            if (
+                self.purchase_item.medicine_id
+                != self.medicine_batch.medicine_id
+            ):
+                raise ValidationError(
+                    "Purchase item and batch medicine do not match."
+                )
+
+    def save(self, *args, **kwargs):
+        if self.purchase_item_id:
+            self.medicine_id = self.purchase_item.medicine_id
+
+            if not self.return_price:
+                self.return_price = (
+                    self.purchase_item.purchase_price
+                )
+
+            self.gst_rate = (
+                self.purchase_item.gst_rate
+            )
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"{self.purchase_return.return_number} - "
+            f"{self.medicine.name}"
+        )        

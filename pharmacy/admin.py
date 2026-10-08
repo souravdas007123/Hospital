@@ -14,6 +14,13 @@ from .models import (
     PrescriptionItem,
     PharmacyDispensing,
     PharmacyDispensingItem,
+    PharmacyPurchaseReturn,
+    PharmacyPurchaseReturnItem,
+)
+from .services import (
+    process_pharmacy_purchase,
+    process_pharmacy_purchase_return,
+    process_pharmacy_dispensing,
 )
 
 
@@ -1159,3 +1166,325 @@ class PharmacyDispensingItemAdmin(admin.ModelAdmin):
     @admin.display(description="Total")
     def total_display(self, obj):
         return obj.total_amount
+    
+
+# ============================================================
+# PURCHASE RETURN ADMIN
+# ============================================================
+
+class PharmacyPurchaseReturnItemInline(admin.TabularInline):
+    model = PharmacyPurchaseReturnItem
+    extra = 1
+    autocomplete_fields = [
+        "purchase_item",
+        "medicine",
+        "medicine_batch",
+    ]
+    readonly_fields = [
+        "stock_reversed",
+        "subtotal_display",
+        "gst_amount_display",
+        "total_amount_display",
+    ]
+
+    fields = [
+        "purchase_item",
+        "medicine",
+        "medicine_batch",
+        "quantity_returned",
+        "return_price",
+        "gst_rate",
+        "reason",
+        "stock_reversed",
+        "subtotal_display",
+        "gst_amount_display",
+        "total_amount_display",
+    ]
+
+    @admin.display(description="Subtotal")
+    def subtotal_display(self, obj):
+        return obj.subtotal
+
+    @admin.display(description="GST")
+    def gst_amount_display(self, obj):
+        return obj.gst_amount
+
+    @admin.display(description="Total")
+    def total_amount_display(self, obj):
+        return obj.total_amount
+
+
+@admin.register(PharmacyPurchaseReturn)
+class PharmacyPurchaseReturnAdmin(admin.ModelAdmin):
+
+    list_display = [
+        "return_number",
+        "purchase",
+        "supplier",
+        "return_date",
+        "status",
+        "total_amount_display",
+        "stock_status",
+        "created_by",
+        "processed_by",
+    ]
+
+    list_filter = [
+        "status",
+        "return_date",
+        "stock_reversed",
+    ]
+
+    search_fields = [
+        "return_number",
+        "purchase__grn_number",
+        "supplier__name",
+    ]
+
+    autocomplete_fields = [
+        "purchase",
+        "supplier",
+        "created_by",
+        "processed_by",
+    ]
+
+    readonly_fields = [
+        "return_number",
+        "stock_reversed",
+        "processed_at",
+        "created_at",
+        "updated_at",
+        "total_amount_display",
+    ]
+
+    inlines = [
+        PharmacyPurchaseReturnItemInline,
+    ]
+
+    actions = [
+        "process_selected_returns",
+    ]
+
+    fieldsets = (
+        (
+            "Return Information",
+            {
+                "fields": (
+                    "return_number",
+                    "purchase",
+                    "supplier",
+                    "return_date",
+                    "reason",
+                    "status",
+                )
+            },
+        ),
+        (
+            "Stock Processing",
+            {
+                "fields": (
+                    "stock_reversed",
+                    "processed_by",
+                    "processed_at",
+                )
+            },
+        ),
+        (
+            "Amount",
+            {
+                "fields": (
+                    "total_amount_display",
+                )
+            },
+        ),
+        (
+            "System Information",
+            {
+                "fields": (
+                    "created_by",
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
+
+    @admin.display(description="Total")
+    def total_amount_display(self, obj):
+        return obj.total_amount
+
+    @admin.display(description="Stock")
+    def stock_status(self, obj):
+        if obj.stock_reversed:
+            return "REVERSED"
+        return "PENDING"
+
+    def save_model(self, request, obj, form, change):
+        if not obj.created_by_id:
+            obj.created_by = request.user
+
+        super().save_model(
+            request,
+            obj,
+            form,
+            change,
+        )
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(
+            request,
+            form,
+            formsets,
+            change,
+        )
+
+        obj = form.instance
+
+        if (
+            obj.status ==
+            PharmacyPurchaseReturn.Status.PROCESSED
+            and not obj.stock_reversed
+        ):
+            try:
+                process_pharmacy_purchase_return(
+                    obj,
+                    user=request.user,
+                )
+
+                self.message_user(
+                    request,
+                    (
+                        f"Purchase return "
+                        f"{obj.return_number} processed "
+                        f"and stock reversed successfully."
+                    ),
+                    messages.SUCCESS,
+                )
+
+            except ValidationError as exc:
+                self.message_user(
+                    request,
+                    str(exc),
+                    messages.ERROR,
+                )
+
+    @admin.action(
+        description="Process selected purchase returns"
+    )
+    def process_selected_returns(
+        self,
+        request,
+        queryset,
+    ):
+        success = 0
+        failed = 0
+
+        for purchase_return in queryset:
+
+            if (
+                purchase_return.status
+                == PharmacyPurchaseReturn.Status.CANCELLED
+            ):
+                failed += 1
+                continue
+
+            if purchase_return.stock_reversed:
+                continue
+
+            try:
+                purchase_return.status = (
+                    PharmacyPurchaseReturn.Status.PROCESSED
+                )
+                purchase_return.save(
+                    update_fields=[
+                        "status",
+                        "updated_at",
+                    ]
+                )
+
+                process_pharmacy_purchase_return(
+                    purchase_return,
+                    user=request.user,
+                )
+
+                success += 1
+
+            except ValidationError as exc:
+                failed += 1
+
+                self.message_user(
+                    request,
+                    (
+                        f"{purchase_return.return_number}: "
+                        f"{exc}"
+                    ),
+                    messages.ERROR,
+                )
+
+        if success:
+            self.message_user(
+                request,
+                (
+                    f"{success} purchase return(s) "
+                    f"processed successfully."
+                ),
+                messages.SUCCESS,
+            )
+
+        if failed:
+            self.message_user(
+                request,
+                f"{failed} purchase return(s) failed.",
+                messages.WARNING,
+            )
+
+
+@admin.register(PharmacyPurchaseReturnItem)
+class PharmacyPurchaseReturnItemAdmin(admin.ModelAdmin):
+
+    list_display = [
+        "purchase_return",
+        "medicine",
+        "medicine_batch",
+        "quantity_returned",
+        "return_price",
+        "total_amount_display",
+        "stock_reversed",
+    ]
+
+    list_filter = [
+        "stock_reversed",
+        "medicine",
+    ]
+
+    search_fields = [
+        "purchase_return__return_number",
+        "medicine__name",
+        "medicine_batch__batch_number",
+    ]
+
+    autocomplete_fields = [
+        "purchase_return",
+        "purchase_item",
+        "medicine",
+        "medicine_batch",
+    ]
+
+    readonly_fields = [
+        "stock_reversed",
+        "subtotal_display",
+        "gst_amount_display",
+        "total_amount_display",
+    ]
+
+    @admin.display(description="Subtotal")
+    def subtotal_display(self, obj):
+        return obj.subtotal
+
+    @admin.display(description="GST")
+    def gst_amount_display(self, obj):
+        return obj.gst_amount
+
+    @admin.display(description="Total")
+    def total_amount_display(self, obj):
+        return obj.total_amount    
