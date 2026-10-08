@@ -2,4 +2,5 @@ from django.apps import AppConfig
 
 
 class IpdConfig(AppConfig):
-    name = 'ipd'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "ipd"

@@ -1,0 +1,926 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <title>
+        Laboratory Report - {{ report.report_number }}
+    </title>
+
+    <style>
+
+        @page {
+            size: A4;
+            margin: 12mm;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: #eeeeee;
+            font-family: Arial, Helvetica, sans-serif;
+            color: #222222;
+            font-size: 12px;
+        }
+
+        .toolbar {
+            width: 210mm;
+            margin: 15px auto;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .toolbar a,
+        .toolbar button {
+            border: none;
+            padding: 10px 18px;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 4px;
+        }
+
+        .back-btn {
+            background: #555555;
+            color: white;
+        }
+
+        .print-btn {
+            background: #1f4e79;
+            color: white;
+        }
+
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto 20px auto;
+            padding: 12mm;
+            background: white;
+        }
+
+        .hospital-header {
+            display: flex;
+            align-items: center;
+            border-bottom: 2px solid #1f4e79;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+        }
+
+        .hospital-logo {
+            width: 75px;
+            height: 75px;
+            object-fit: contain;
+            margin-right: 15px;
+        }
+
+        .hospital-info {
+            flex: 1;
+        }
+
+        .hospital-name {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1f4e79;
+            margin-bottom: 4px;
+        }
+
+        .hospital-registration {
+            font-size: 11px;
+            color: #555555;
+            margin-bottom: 4px;
+        }
+
+        .hospital-address {
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .hospital-contact {
+            font-size: 11px;
+            margin-top: 3px;
+        }
+
+        .report-title {
+            text-align: center;
+            font-size: 18px;
+            font-weight: 700;
+            color: #1f4e79;
+            margin: 12px 0;
+            letter-spacing: 0.5px;
+        }
+
+        .report-meta {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+        }
+
+        .report-meta td {
+            border: 1px solid #cccccc;
+            padding: 7px;
+            vertical-align: top;
+        }
+
+        .meta-label {
+            width: 17%;
+            font-weight: 700;
+            background: #f3f6f9;
+            color: #333333;
+        }
+
+        .meta-value {
+            width: 33%;
+        }
+
+        .section-title {
+            background: #1f4e79;
+            color: white;
+            font-weight: 700;
+            padding: 7px 9px;
+            margin-top: 12px;
+            margin-bottom: 0;
+            font-size: 12px;
+        }
+
+        .patient-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .patient-table td {
+            border: 1px solid #cccccc;
+            padding: 7px;
+        }
+
+        .patient-label {
+            width: 16%;
+            background: #f3f6f9;
+            font-weight: 700;
+        }
+
+        .patient-value {
+            width: 34%;
+        }
+
+        .clinical-summary {
+            border: 1px solid #cccccc;
+            border-top: none;
+            padding: 9px;
+            line-height: 1.5;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0;
+        }
+
+        .results-table th {
+            background: #e8edf2;
+            border: 1px solid #aaaaaa;
+            padding: 7px 5px;
+            font-size: 11px;
+            text-align: left;
+        }
+
+        .results-table td {
+            border: 1px solid #cccccc;
+            padding: 7px 5px;
+            vertical-align: top;
+        }
+
+        .results-table tr {
+            page-break-inside: avoid;
+        }
+
+        .test-name {
+            font-weight: 700;
+        }
+
+        .category-name {
+            color: #555555;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+
+        .abnormal {
+            font-weight: 700;
+        }
+
+        .critical {
+            font-weight: 700;
+        }
+
+        .status-normal {
+            font-weight: 600;
+        }
+
+        .status-abnormal {
+            font-weight: 700;
+        }
+
+        .status-critical {
+            font-weight: 700;
+        }
+
+        .methodology {
+            font-size: 10px;
+            color: #666666;
+            margin-top: 3px;
+        }
+
+        .report-notes {
+            border: 1px solid #cccccc;
+            border-top: none;
+            padding: 9px;
+            min-height: 45px;
+            line-height: 1.5;
+        }
+
+        .signature-section {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 45px;
+            gap: 25px;
+        }
+
+        .signature-box {
+            width: 32%;
+            text-align: center;
+            min-height: 75px;
+        }
+
+        .signature-line {
+            border-top: 1px solid #555555;
+            margin-top: 45px;
+            padding-top: 5px;
+            font-weight: 700;
+        }
+
+        .signature-name {
+            font-size: 11px;
+        }
+
+        .signature-date {
+            font-size: 9px;
+            color: #666666;
+            margin-top: 3px;
+        }
+
+        .footer {
+            border-top: 1px solid #cccccc;
+            margin-top: 25px;
+            padding-top: 7px;
+            text-align: center;
+            font-size: 9px;
+            color: #777777;
+        }
+
+        .priority {
+            font-weight: 700;
+        }
+
+        .empty-results {
+            text-align: center;
+            padding: 15px;
+            border: 1px solid #cccccc;
+            color: #777777;
+        }
+
+        @media print {
+
+            body {
+                background: white;
+            }
+
+            .toolbar {
+                display: none;
+            }
+
+            .page {
+                width: 100%;
+                min-height: auto;
+                margin: 0;
+                padding: 0;
+            }
+
+            .hospital-header {
+                margin-top: 0;
+            }
+
+            a {
+                color: inherit;
+                text-decoration: none;
+            }
+
+        }
+
+    </style>
+</head>
+
+<body>
+
+    <!-- PRINT TOOLBAR -->
+
+    <div class="toolbar">
+
+        <a
+            href="{% url 'admin:laboratory_labreport_changelist' %}"
+            class="back-btn"
+        >
+            ← Back
+        </a>
+
+        <button
+            type="button"
+            class="print-btn"
+            onclick="window.print()"
+        >
+            🖨 Print / Save PDF
+        </button>
+
+    </div>
+
+
+    <!-- A4 PAGE -->
+
+    <div class="page">
+
+        <!-- HOSPITAL HEADER -->
+
+        <div class="hospital-header">
+
+            {% if hospital and hospital.logo %}
+                <img
+                    src="{{ hospital.logo.url }}"
+                    alt="Hospital Logo"
+                    class="hospital-logo"
+                >
+            {% endif %}
+
+            <div class="hospital-info">
+
+                {% if hospital %}
+                    <div class="hospital-name">
+                        {{ hospital.name }}
+                    </div>
+
+                    {% if hospital.registration_number %}
+                        <div class="hospital-registration">
+                            Registration No:
+                            {{ hospital.registration_number }}
+                        </div>
+                    {% endif %}
+
+                    <div class="hospital-address">
+
+                        {% if hospital.address %}
+                            {{ hospital.address }}
+                        {% endif %}
+
+                        {% if hospital.city %}
+                            , {{ hospital.city }}
+                        {% endif %}
+
+                        {% if hospital.state %}
+                            , {{ hospital.state }}
+                        {% endif %}
+
+                        {% if hospital.country %}
+                            , {{ hospital.country }}
+                        {% endif %}
+
+                        {% if hospital.postal_code %}
+                            - {{ hospital.postal_code }}
+                        {% endif %}
+
+                    </div>
+
+                    <div class="hospital-contact">
+
+                        {% if hospital.phone %}
+                            Phone: {{ hospital.phone }}
+                        {% endif %}
+
+                        {% if hospital.email %}
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            Email: {{ hospital.email }}
+                        {% endif %}
+
+                    </div>
+
+                {% else %}
+
+                    <div class="hospital-name">
+                        Hospital
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+
+        <!-- REPORT TITLE -->
+
+        <div class="report-title">
+            LABORATORY INVESTIGATION REPORT
+        </div>
+
+
+        <!-- REPORT INFORMATION -->
+
+        <table class="report-meta">
+
+            <tr>
+
+                <td class="meta-label">
+                    Report No.
+                </td>
+
+                <td class="meta-value">
+                    {{ report.report_number }}
+                </td>
+
+                <td class="meta-label">
+                    Report Date
+                </td>
+
+                <td class="meta-value">
+                    {{ report.report_date|date:"d-m-Y H:i" }}
+                </td>
+
+            </tr>
+
+            <tr>
+
+                <td class="meta-label">
+                    Order No.
+                </td>
+
+                <td class="meta-value">
+                    {{ order.order_number }}
+                </td>
+
+                <td class="meta-label">
+                    Order Date
+                </td>
+
+                <td class="meta-value">
+                    {{ order.order_date|date:"d-m-Y H:i" }}
+                </td>
+
+            </tr>
+
+            <tr>
+
+                <td class="meta-label">
+                    Ref. Doctor
+                </td>
+
+                <td class="meta-value">
+                    {% if order.doctor %}
+                        {{ order.doctor.get_full_name|default:order.doctor.username }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+
+                <td class="meta-label">
+                    Priority
+                </td>
+
+                <td class="meta-value">
+
+                    {% if order.priority %}
+                        <span class="priority">
+                            URGENT
+                        </span>
+                    {% else %}
+                        Routine
+                    {% endif %}
+
+                </td>
+
+            </tr>
+
+        </table>
+
+
+        <!-- PATIENT INFORMATION -->
+
+        <div class="section-title">
+            PATIENT INFORMATION
+        </div>
+
+        <table class="patient-table">
+
+            <tr>
+
+                <td class="patient-label">
+                    UHID
+                </td>
+
+                <td class="patient-value">
+                    {{ patient.uhid }}
+                </td>
+
+                <td class="patient-label">
+                    Patient Name
+                </td>
+
+                <td class="patient-value">
+
+                    {{ patient.first_name }}
+
+                    {% if patient.last_name %}
+                        {{ patient.last_name }}
+                    {% endif %}
+
+                </td>
+
+            </tr>
+
+            <tr>
+
+                <td class="patient-label">
+                    Age
+                </td>
+
+                <td class="patient-value">
+
+                    {% if patient_age != None %}
+                        {{ patient_age }} Years
+                    {% else %}
+                        -
+                    {% endif %}
+
+                </td>
+
+                <td class="patient-label">
+                    Gender
+                </td>
+
+                <td class="patient-value">
+                    {{ patient.get_gender_display }}
+                </td>
+
+            </tr>
+
+            <tr>
+
+                <td class="patient-label">
+                    DOB
+                </td>
+
+                <td class="patient-value">
+
+                    {% if patient.dob %}
+                        {{ patient.dob|date:"d-m-Y" }}
+                    {% else %}
+                        -
+                    {% endif %}
+
+                </td>
+
+                <td class="patient-label">
+                    Blood Group
+                </td>
+
+                <td class="patient-value">
+                    {{ patient.get_blood_group_display }}
+                </td>
+
+            </tr>
+
+            <tr>
+
+                <td class="patient-label">
+                    Phone
+                </td>
+
+                <td class="patient-value">
+                    {{ patient.phone|default:"-" }}
+                </td>
+
+                <td class="patient-label">
+                    Address
+                </td>
+
+                <td class="patient-value">
+                    {{ patient.address|default:"-" }}
+                </td>
+
+            </tr>
+
+        </table>
+
+
+        <!-- CLINICAL SUMMARY -->
+
+        {% if report.clinical_summary %}
+
+            <div class="section-title">
+                CLINICAL SUMMARY
+            </div>
+
+            <div class="clinical-summary">
+                {{ report.clinical_summary|linebreaksbr }}
+            </div>
+
+        {% endif %}
+
+
+        <!-- LAB RESULTS -->
+
+        <div class="section-title">
+            LABORATORY RESULTS
+        </div>
+
+        {% if results %}
+
+            <table class="results-table">
+
+                <thead>
+
+                    <tr>
+
+                        <th style="width: 27%;">
+                            Investigation
+                        </th>
+
+                        <th style="width: 18%;">
+                            Result
+                        </th>
+
+                        <th style="width: 12%;">
+                            Unit
+                        </th>
+
+                        <th style="width: 25%;">
+                            Reference Range
+                        </th>
+
+                        <th style="width: 18%;">
+                            Status
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    {% for result in results %}
+
+                        <tr>
+
+                            <td>
+
+                                <div class="test-name">
+                                    {{ result.test.name }}
+                                </div>
+
+                                {% if result.test.short_name %}
+                                    <div class="category-name">
+                                        {{ result.test.short_name }}
+                                    </div>
+                                {% endif %}
+
+                                {% if result.test.methodology %}
+                                    <div class="methodology">
+                                        Method:
+                                        {{ result.test.methodology }}
+                                    </div>
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+
+                                {% if result.is_critical %}
+
+                                    <span class="critical">
+                                        {{ result.result_value|default:"-" }}
+                                    </span>
+
+                                {% elif result.is_abnormal %}
+
+                                    <span class="abnormal">
+                                        {{ result.result_value|default:"-" }}
+                                    </span>
+
+                                {% else %}
+
+                                    {{ result.result_value|default:"-" }}
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+                                {{ result.unit|default:"-" }}
+                            </td>
+
+
+                            <td>
+                                {{ result.reference_range|default:"-" }}
+                            </td>
+
+
+                            <td>
+
+                                {% if result.is_critical %}
+
+                                    <span class="status-critical">
+                                        CRITICAL
+                                    </span>
+
+                                {% elif result.is_abnormal %}
+
+                                    <span class="status-abnormal">
+                                        ABNORMAL
+                                    </span>
+
+                                {% elif result.status == "VERIFIED" %}
+
+                                    <span class="status-normal">
+                                        VERIFIED
+                                    </span>
+
+                                {% else %}
+
+                                    {{ result.get_status_display }}
+
+                                {% endif %}
+
+                            </td>
+
+                        </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        {% else %}
+
+            <div class="empty-results">
+                No laboratory results available.
+            </div>
+
+        {% endif %}
+
+
+        <!-- REPORT NOTES -->
+
+        {% if report.report_notes %}
+
+            <div class="section-title">
+                REPORT NOTES
+            </div>
+
+            <div class="report-notes">
+                {{ report.report_notes|linebreaksbr }}
+            </div>
+
+        {% endif %}
+
+
+        <!-- SIGNATURES -->
+
+        <div class="signature-section">
+
+
+            <div class="signature-box">
+
+                {% if report.prepared_by %}
+
+                    <div class="signature-name">
+                        {{ report.prepared_by.get_full_name|default:report.prepared_by.username }}
+                    </div>
+
+                {% endif %}
+
+                <div class="signature-line">
+                    Prepared By
+                </div>
+
+                {% if report.created_at %}
+
+                    <div class="signature-date">
+                        {{ report.created_at|date:"d-m-Y H:i" }}
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+
+            <div class="signature-box">
+
+                {% if report.verified_by %}
+
+                    <div class="signature-name">
+                        {{ report.verified_by.get_full_name|default:report.verified_by.username }}
+                    </div>
+
+                {% endif %}
+
+                <div class="signature-line">
+                    Verified By
+                </div>
+
+                {% if report.verified_at %}
+
+                    <div class="signature-date">
+                        {{ report.verified_at|date:"d-m-Y H:i" }}
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+
+            <div class="signature-box">
+
+                {% if report.finalized_by %}
+
+                    <div class="signature-name">
+                        {{ report.finalized_by.get_full_name|default:report.finalized_by.username }}
+                    </div>
+
+                {% endif %}
+
+                <div class="signature-line">
+                    Finalized By
+                </div>
+
+                {% if report.finalized_at %}
+
+                    <div class="signature-date">
+                        {{ report.finalized_at|date:"d-m-Y H:i" }}
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+
+        </div>
+
+
+        <!-- FOOTER -->
+
+        <div class="footer">
+
+            This is a computer-generated laboratory report.
+
+            {% if printed_by %}
+                &nbsp; Printed by:
+                {{ printed_by.get_full_name|default:printed_by.username }}.
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <script>
+
+        /*
+         * Optional auto-print:
+         * /laboratory/reports/1/print/?print=1
+         */
+
+        const params = new URLSearchParams(
+            window.location.search
+        );
+
+        if (params.get("print") === "1") {
+
+            window.addEventListener(
+                "load",
+                function () {
+                    window.print();
+                }
+            );
+
+        }
+
+    </script>
+
+</body>
+</html>
