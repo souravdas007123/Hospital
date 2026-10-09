@@ -1,3 +1,4 @@
+
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -16,15 +17,13 @@ from .models import (
     LabResult,
     LabReport,
 )
-
 from .services import (
     add_package_to_order,
     create_sample,
     collect_sample,
     receive_sample,
-    create_result,
-    verify_result,
     create_lab_report,
+    verify_result,
     verify_lab_report,
     finalize_lab_report,
     update_order_status,
@@ -32,28 +31,17 @@ from .services import (
 )
 
 
-# ============================================================
-# HELPER
-# ============================================================
-
 def get_error_message(exc):
     if isinstance(exc, ValidationError):
         if hasattr(exc, "message_dict"):
             return str(exc.message_dict)
-
         if hasattr(exc, "messages"):
             return ", ".join(exc.messages)
-
     return str(exc)
 
 
-# ============================================================
-# LAB CATEGORY
-# ============================================================
-
 @admin.register(LabCategory)
 class LabCategoryAdmin(admin.ModelAdmin):
-
     list_display = (
         "name",
         "code",
@@ -61,63 +49,23 @@ class LabCategoryAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+    search_fields = ("name", "code")
+    list_filter = ("is_active",)
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
 
-    search_fields = (
-        "name",
-        "code",
-    )
-
-    list_filter = (
-        "is_active",
-    )
-
-    ordering = (
-        "name",
-    )
-
-    readonly_fields = (
-        "created_at",
-        "updated_at",
-    )
-
-
-# ============================================================
-# SAMPLE TYPE
-# ============================================================
 
 @admin.register(SampleType)
 class SampleTypeAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "is_active")
+    search_fields = ("name", "code")
+    list_filter = ("is_active",)
+    ordering = ("name",)
 
-    list_display = (
-        "name",
-        "code",
-        "is_active",
-    )
-
-    search_fields = (
-        "name",
-        "code",
-    )
-
-    list_filter = (
-        "is_active",
-    )
-
-    ordering = (
-        "name",
-    )
-
-
-# ============================================================
-# LAB REFERENCE RANGE INLINE
-# ============================================================
 
 class LabReferenceRangeInline(admin.TabularInline):
-
     model = LabReferenceRange
-
     extra = 1
-
     fields = (
         "gender",
         "age_min",
@@ -132,13 +80,8 @@ class LabReferenceRangeInline(admin.TabularInline):
     )
 
 
-# ============================================================
-# LAB TEST
-# ============================================================
-
 @admin.register(LabTest)
 class LabTestAdmin(admin.ModelAdmin):
-
     list_display = (
         "test_code",
         "name",
@@ -150,47 +93,21 @@ class LabTestAdmin(admin.ModelAdmin):
         "turnaround_time_minutes",
         "is_active",
     )
-
-    search_fields = (
-        "test_code",
-        "name",
-        "short_name",
-    )
-
+    search_fields = ("test_code", "name", "short_name")
     list_filter = (
         "category",
         "sample_type",
         "result_type",
         "is_active",
     )
+    autocomplete_fields = ("category", "sample_type")
+    readonly_fields = ("test_code", "created_at", "updated_at")
+    inlines = (LabReferenceRangeInline,)
+    ordering = ("name",)
 
-    autocomplete_fields = (
-        "category",
-        "sample_type",
-    )
-
-    readonly_fields = (
-        "test_code",
-        "created_at",
-        "updated_at",
-    )
-
-    inlines = (
-        LabReferenceRangeInline,
-    )
-
-    ordering = (
-        "name",
-    )
-
-
-# ============================================================
-# REFERENCE RANGE
-# ============================================================
 
 @admin.register(LabReferenceRange)
 class LabReferenceRangeAdmin(admin.ModelAdmin):
-
     list_display = (
         "test",
         "gender",
@@ -202,53 +119,21 @@ class LabReferenceRangeAdmin(admin.ModelAdmin):
         "critical_high",
         "is_active",
     )
+    search_fields = ("test__name", "test__test_code")
+    list_filter = ("gender", "is_active")
+    autocomplete_fields = ("test",)
+    ordering = ("test", "age_min")
 
-    search_fields = (
-        "test__name",
-        "test__test_code",
-    )
-
-    list_filter = (
-        "gender",
-        "is_active",
-    )
-
-    autocomplete_fields = (
-        "test",
-    )
-
-    ordering = (
-        "test",
-        "age_min",
-    )
-
-
-# ============================================================
-# LAB PACKAGE ITEM INLINE
-# ============================================================
 
 class LabPackageItemInline(admin.TabularInline):
-
     model = LabPackageItem
-
     extra = 1
+    fields = ("test",)
+    autocomplete_fields = ("test",)
 
-    fields = (
-        "test",
-    )
-
-    autocomplete_fields = (
-        "test",
-    )
-
-
-# ============================================================
-# LAB PACKAGE
-# ============================================================
 
 @admin.register(LabPackage)
 class LabPackageAdmin(admin.ModelAdmin):
-
     list_display = (
         "package_code",
         "name",
@@ -257,67 +142,33 @@ class LabPackageAdmin(admin.ModelAdmin):
         "final_price",
         "is_active",
     )
-
-    search_fields = (
-        "package_code",
-        "name",
-    )
-
-    list_filter = (
-        "is_active",
-    )
-
+    search_fields = ("package_code", "name")
+    list_filter = ("is_active",)
     readonly_fields = (
         "package_code",
         "final_price",
         "created_at",
         "updated_at",
     )
+    inlines = (LabPackageItemInline,)
+    ordering = ("name",)
 
-    inlines = (
-        LabPackageItemInline,
-    )
-
-    ordering = (
-        "name",
-    )
-
-
-# ============================================================
-# LAB PACKAGE ITEM
-# ============================================================
 
 @admin.register(LabPackageItem)
 class LabPackageItemAdmin(admin.ModelAdmin):
-
-    list_display = (
-        "package",
-        "test",
-    )
-
+    list_display = ("package", "test")
     search_fields = (
         "package__name",
         "package__package_code",
         "test__name",
         "test__test_code",
     )
+    autocomplete_fields = ("package", "test")
 
-    autocomplete_fields = (
-        "package",
-        "test",
-    )
-
-
-# ============================================================
-# LAB ORDER ITEM INLINE
-# ============================================================
 
 class LabOrderItemInline(admin.TabularInline):
-
     model = LabOrderItem
-
     extra = 1
-
     fields = (
         "item_type",
         "test",
@@ -328,30 +179,21 @@ class LabOrderItemInline(admin.TabularInline):
         "status",
         "notes",
     )
+    autocomplete_fields = ("test", "package")
 
-    autocomplete_fields = (
-        "test",
-        "package",
-    )
-
-
-# ============================================================
-# LAB ORDER
-# ============================================================
 
 @admin.register(LabOrder)
 class LabOrderAdmin(admin.ModelAdmin):
-
     list_display = (
         "order_number",
         "patient",
         "doctor",
+        "order_source",
         "order_date",
         "status",
         "priority",
         "total_amount",
     )
-
     search_fields = (
         "order_number",
         "patient__uhid",
@@ -360,41 +202,30 @@ class LabOrderAdmin(admin.ModelAdmin):
         "doctor__username",
         "doctor__first_name",
         "doctor__last_name",
+        "ipd_admission__admission_number",
     )
-
     list_filter = (
         "status",
         "priority",
         "order_date",
+        "ipd_admission",
     )
-
     autocomplete_fields = (
         "patient",
         "doctor",
         "opd_visit",
+        "ipd_admission",
         "created_by",
     )
-
     readonly_fields = (
         "order_number",
         "total_amount",
         "created_at",
         "updated_at",
     )
-
-    inlines = (
-        LabOrderItemInline,
-    )
-
-    actions = (
-        "action_expand_packages",
-        "action_create_reports",
-    )
-
-    ordering = (
-        "-order_date",
-        "-id",
-    )
+    inlines = (LabOrderItemInline,)
+    actions = ("action_expand_packages", "action_create_reports")
+    ordering = ("-order_date", "-id")
 
     fieldsets = (
         (
@@ -405,6 +236,7 @@ class LabOrderAdmin(admin.ModelAdmin):
                     "patient",
                     "doctor",
                     "opd_visit",
+                    "ipd_admission",
                     "order_date",
                     "status",
                     "priority",
@@ -413,19 +245,11 @@ class LabOrderAdmin(admin.ModelAdmin):
         ),
         (
             "Clinical Information",
-            {
-                "fields": (
-                    "clinical_notes",
-                )
-            },
+            {"fields": ("clinical_notes",)},
         ),
         (
             "Billing",
-            {
-                "fields": (
-                    "total_amount",
-                )
-            },
+            {"fields": ("total_amount",)},
         ),
         (
             "System Information",
@@ -439,56 +263,50 @@ class LabOrderAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="Order Source")
+    def order_source(self, obj):
+        if obj.ipd_admission_id:
+            return format_html(
+                '<span style="color:#b45309;font-weight:600;">'
+                'IPD: {}</span>',
+                obj.ipd_admission.admission_number,
+            )
+        if obj.opd_visit_id:
+            return "OPD"
+        return "General"
+
     def save_model(self, request, obj, form, change):
-
-        if not obj.created_by:
+        if not obj.created_by_id:
             obj.created_by = request.user
-
-        super().save_model(
-            request,
-            obj,
-            form,
-            change,
-        )
+        super().save_model(request, obj, form, change)
 
     @admin.action(description="Expand Package Tests")
     def action_expand_packages(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for order in queryset:
-
             try:
                 package_items = order.items.filter(
                     item_type=LabOrderItem.ItemType.PACKAGE
                 ).select_related("package")
 
                 for item in package_items:
-
                     if item.package:
-                        add_package_to_order(
-                            order,
-                            item.package,
-                        )
+                        add_package_to_order(order, item.package)
 
                 update_order_status(order)
-
                 success_count += 1
 
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{order.order_number}: "
-                    f"{get_error_message(exc)}",
+                    f"{order.order_number}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} order(s) processed successfully.",
@@ -496,7 +314,6 @@ class LabOrderAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} order(s) failed.",
@@ -505,41 +322,26 @@ class LabOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="Create Lab Reports")
     def action_create_reports(self, request, queryset):
-
-        success_count = 0
         error_count = 0
 
         for order in queryset:
-
             try:
-
-                report = create_lab_report(
-                    order,
-                    request.user,
-                )
-
-                success_count += 1
-
+                report = create_lab_report(order, request.user)
                 self.message_user(
                     request,
                     f"{order.order_number}: "
                     f"Report {report.report_number} created.",
                     messages.SUCCESS,
                 )
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{order.order_number}: "
-                    f"{get_error_message(exc)}",
+                    f"{order.order_number}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} report(s) could not be created.",
@@ -547,13 +349,8 @@ class LabOrderAdmin(admin.ModelAdmin):
             )
 
 
-# ============================================================
-# LAB ORDER ITEM
-# ============================================================
-
 @admin.register(LabOrderItem)
 class LabOrderItemAdmin(admin.ModelAdmin):
-
     list_display = (
         "order",
         "item_type",
@@ -565,71 +362,40 @@ class LabOrderItemAdmin(admin.ModelAdmin):
         "status",
         "total_amount",
     )
-
     search_fields = (
         "order__order_number",
+        "order__ipd_admission__admission_number",
         "test__name",
         "test__test_code",
         "package__name",
         "package__package_code",
     )
-
-    list_filter = (
-        "item_type",
-        "status",
-    )
-
-    autocomplete_fields = (
-        "order",
-        "test",
-        "package",
-    )
-
-    readonly_fields = (
-        "total_amount",
-    )
-
-    actions = (
-        "action_create_samples",
-    )
+    list_filter = ("item_type", "status")
+    autocomplete_fields = ("order", "test", "package")
+    readonly_fields = ("total_amount",)
+    actions = ("action_create_samples",)
 
     @admin.action(description="Create Samples")
     def action_create_samples(self, request, queryset):
-
-        success_count = 0
         error_count = 0
 
         for item in queryset:
-
             try:
-
-                sample = create_sample(
-                    item,
-                    request.user,
-                )
-
-                success_count += 1
-
+                sample = create_sample(item, request.user)
                 self.message_user(
                     request,
-                    f"Sample {sample.sample_number} "
-                    f"created for {item}.",
+                    f"Sample {sample.sample_number} created for {item}.",
                     messages.SUCCESS,
                 )
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{item}: "
-                    f"{get_error_message(exc)}",
+                    f"{item}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} sample(s) failed.",
@@ -637,13 +403,8 @@ class LabOrderItemAdmin(admin.ModelAdmin):
             )
 
 
-# ============================================================
-# LAB SAMPLE
-# ============================================================
-
 @admin.register(LabSample)
 class LabSampleAdmin(admin.ModelAdmin):
-
     list_display = (
         "sample_number",
         "barcode",
@@ -654,19 +415,14 @@ class LabSampleAdmin(admin.ModelAdmin):
         "collected_at",
         "received_at",
     )
-
     search_fields = (
         "sample_number",
         "barcode",
         "order__order_number",
         "order__patient__uhid",
+        "order__ipd_admission__admission_number",
     )
-
-    list_filter = (
-        "status",
-        "sample_type",
-    )
-
+    list_filter = ("status", "sample_type")
     autocomplete_fields = (
         "order",
         "order_item",
@@ -674,53 +430,33 @@ class LabSampleAdmin(admin.ModelAdmin):
         "collected_by",
         "received_by",
     )
-
     readonly_fields = (
         "sample_number",
         "barcode",
         "created_at",
         "updated_at",
     )
-
-    actions = (
-        "action_collect_samples",
-        "action_receive_samples",
-    )
-
-    ordering = (
-        "-created_at",
-    )
+    actions = ("action_collect_samples", "action_receive_samples")
+    ordering = ("-created_at",)
 
     @admin.action(description="Collect Selected Samples")
     def action_collect_samples(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for sample in queryset:
-
             try:
-
-                collect_sample(
-                    sample,
-                    request.user,
-                )
-
+                collect_sample(sample, request.user)
                 success_count += 1
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{sample.sample_number}: "
-                    f"{get_error_message(exc)}",
+                    f"{sample.sample_number}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} sample(s) collected.",
@@ -728,7 +464,6 @@ class LabSampleAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} sample(s) failed.",
@@ -737,34 +472,22 @@ class LabSampleAdmin(admin.ModelAdmin):
 
     @admin.action(description="Receive Selected Samples")
     def action_receive_samples(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for sample in queryset:
-
             try:
-
-                receive_sample(
-                    sample,
-                    request.user,
-                )
-
+                receive_sample(sample, request.user)
                 success_count += 1
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{sample.sample_number}: "
-                    f"{get_error_message(exc)}",
+                    f"{sample.sample_number}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} sample(s) received.",
@@ -772,7 +495,6 @@ class LabSampleAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} sample(s) failed.",
@@ -780,13 +502,8 @@ class LabSampleAdmin(admin.ModelAdmin):
             )
 
 
-# ============================================================
-# LAB RESULT
-# ============================================================
-
 @admin.register(LabResult)
 class LabResultAdmin(admin.ModelAdmin):
-
     list_display = (
         "test",
         "sample",
@@ -799,21 +516,15 @@ class LabResultAdmin(admin.ModelAdmin):
         "is_critical",
         "verified_by",
     )
-
     search_fields = (
         "test__name",
         "test__test_code",
         "sample__sample_number",
         "sample__barcode",
         "order_item__order__order_number",
+        "order_item__order__ipd_admission__admission_number",
     )
-
-    list_filter = (
-        "status",
-        "is_abnormal",
-        "is_critical",
-    )
-
+    list_filter = ("status", "is_abnormal", "is_critical")
     autocomplete_fields = (
         "sample",
         "order_item",
@@ -821,62 +532,38 @@ class LabResultAdmin(admin.ModelAdmin):
         "entered_by",
         "verified_by",
     )
-
     readonly_fields = (
         "entered_at",
         "verified_at",
         "created_at",
         "updated_at",
     )
-
-    actions = (
-        "action_evaluate_results",
-        "action_verify_results",
-    )
-
-    ordering = (
-        "test__name",
-    )
+    actions = ("action_evaluate_results", "action_verify_results")
+    ordering = ("test__name",)
 
     def save_model(self, request, obj, form, change):
-
-        if not obj.entered_by:
+        if not obj.entered_by_id:
             obj.entered_by = request.user
-
-        super().save_model(
-            request,
-            obj,
-            form,
-            change,
-        )
+        super().save_model(request, obj, form, change)
 
     @admin.action(description="Evaluate Selected Results")
     def action_evaluate_results(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for result in queryset:
-
             try:
-
                 evaluate_result(result)
-
                 success_count += 1
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{result.test}: "
-                    f"{get_error_message(exc)}",
+                    f"{result.test}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} result(s) evaluated.",
@@ -884,7 +571,6 @@ class LabResultAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} result(s) failed.",
@@ -893,34 +579,22 @@ class LabResultAdmin(admin.ModelAdmin):
 
     @admin.action(description="Verify Selected Results")
     def action_verify_results(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for result in queryset:
-
             try:
-
-                verify_result(
-                    result,
-                    request.user,
-                )
-
+                verify_result(result, request.user)
                 success_count += 1
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{result.test}: "
-                    f"{get_error_message(exc)}",
+                    f"{result.test}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} result(s) verified.",
@@ -928,7 +602,6 @@ class LabResultAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} result(s) failed.",
@@ -936,13 +609,8 @@ class LabResultAdmin(admin.ModelAdmin):
             )
 
 
-# ============================================================
-# LAB REPORT
-# ============================================================
-
 @admin.register(LabReport)
 class LabReportAdmin(admin.ModelAdmin):
-
     list_display = (
         "report_number",
         "order",
@@ -954,20 +622,15 @@ class LabReportAdmin(admin.ModelAdmin):
         "finalized_by",
         "print_report",
     )
-
     search_fields = (
         "report_number",
         "order__order_number",
+        "order__ipd_admission__admission_number",
         "patient__uhid",
         "patient__first_name",
         "patient__last_name",
     )
-
-    list_filter = (
-        "status",
-        "report_date",
-    )
-
+    list_filter = ("status", "report_date")
     autocomplete_fields = (
         "order",
         "patient",
@@ -975,7 +638,6 @@ class LabReportAdmin(admin.ModelAdmin):
         "verified_by",
         "finalized_by",
     )
-
     readonly_fields = (
         "report_number",
         "report_date",
@@ -985,15 +647,8 @@ class LabReportAdmin(admin.ModelAdmin):
         "updated_at",
         "print_report",
     )
-
-    actions = (
-        "action_verify_reports",
-        "action_finalize_reports",
-    )
-
-    ordering = (
-        "-report_date",
-    )
+    actions = ("action_verify_reports", "action_finalize_reports")
+    ordering = ("-report_date",)
 
     fieldsets = (
         (
@@ -1010,12 +665,7 @@ class LabReportAdmin(admin.ModelAdmin):
         ),
         (
             "Report Content",
-            {
-                "fields": (
-                    "clinical_summary",
-                    "report_notes",
-                )
-            },
+            {"fields": ("clinical_summary", "report_notes")},
         ),
         (
             "Verification",
@@ -1031,91 +681,49 @@ class LabReportAdmin(admin.ModelAdmin):
         ),
         (
             "System Information",
-            {
-                "fields": (
-                    "created_at",
-                    "updated_at",
-                )
-            },
+            {"fields": ("created_at", "updated_at")},
         ),
-        (
-            "Print",
-            {
-                "fields": (
-                    "print_report",
-                )
-            },
-        ),
+        ("Print", {"fields": ("print_report",)}),
     )
 
+    @admin.display(description="Print")
     def print_report(self, obj):
-
         if not obj or not obj.pk:
             return "-"
 
-        url = reverse(
-            "laboratory:lab_report_print",
-            args=[obj.pk],
-        )
-
+        url = reverse("laboratory:lab_report_print", args=[obj.pk])
         return format_html(
             '<a href="{}" target="_blank" '
-            'style="'
-            'display:inline-block;'
-            'background:#1f4e79;'
-            'color:#fff;'
-            'padding:7px 12px;'
-            'border-radius:4px;'
-            'font-weight:600;'
-            'text-decoration:none;'
-            '">🖨 Print Report</a>',
+            'style="display:inline-block;background:#1f4e79;'
+            'color:#fff;padding:7px 12px;border-radius:4px;'
+            'font-weight:600;text-decoration:none;">'
+            '🖨 Print Report</a>',
             url,
         )
 
-    print_report.short_description = "Print"
-
     def save_model(self, request, obj, form, change):
-
-        if not obj.prepared_by:
+        if not obj.prepared_by_id:
             obj.prepared_by = request.user
-
-        super().save_model(
-            request,
-            obj,
-            form,
-            change,
-        )
+        super().save_model(request, obj, form, change)
 
     @admin.action(description="Verify Selected Reports")
     def action_verify_reports(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for report in queryset:
-
             try:
-
-                verify_lab_report(
-                    report,
-                    request.user,
-                )
-
+                verify_lab_report(report, request.user)
                 success_count += 1
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{report.report_number}: "
-                    f"{get_error_message(exc)}",
+                    f"{report.report_number}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} report(s) verified.",
@@ -1123,7 +731,6 @@ class LabReportAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} report(s) failed.",
@@ -1132,34 +739,22 @@ class LabReportAdmin(admin.ModelAdmin):
 
     @admin.action(description="Finalize Selected Reports")
     def action_finalize_reports(self, request, queryset):
-
         success_count = 0
         error_count = 0
 
         for report in queryset:
-
             try:
-
-                finalize_lab_report(
-                    report,
-                    request.user,
-                )
-
+                finalize_lab_report(report, request.user)
                 success_count += 1
-
             except Exception as exc:
-
                 error_count += 1
-
                 self.message_user(
                     request,
-                    f"{report.report_number}: "
-                    f"{get_error_message(exc)}",
+                    f"{report.report_number}: {get_error_message(exc)}",
                     messages.ERROR,
                 )
 
         if success_count:
-
             self.message_user(
                 request,
                 f"{success_count} report(s) finalized.",
@@ -1167,7 +762,6 @@ class LabReportAdmin(admin.ModelAdmin):
             )
 
         if error_count:
-
             self.message_user(
                 request,
                 f"{error_count} report(s) failed.",

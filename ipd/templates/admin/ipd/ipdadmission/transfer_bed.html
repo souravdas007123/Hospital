@@ -1,191 +1,39 @@
+
 {% extends "admin/base_site.html" %}
 
+{% block title %}Transfer Patient Bed{% endblock %}
+
 {% block content %}
+<div id="content-main">
+    <h1>Transfer Patient Bed</h1>
 
-<div style="max-width:900px;">
+    <form method="post" novalidate>
+        {% csrf_token %}
 
-    <div
-        style="
-            background:#1f4e79;
-            color:white;
-            padding:18px 22px;
-            border-radius:8px 8px 0 0;
-        "
-    >
+        {% if form.non_field_errors %}
+            <div class="errornote">{{ form.non_field_errors }}</div>
+        {% endif %}
 
-        <h1 style="margin:0;">
-            Transfer Patient Bed
-        </h1>
-
-    </div>
-
-
-    <div
-        style="
-            background:white;
-            border:1px solid #ddd;
-            padding:25px;
-        "
-    >
-
-        <div
-            style="
-                background:#f5f7fa;
-                padding:15px;
-                margin-bottom:25px;
-                border-radius:6px;
-            "
-        >
-
-            <strong>Admission:</strong>
-            {{ admission.admission_number }}
-
-            <br>
-
-            <strong>Patient:</strong>
-            {{ admission.patient }}
-
-            <br>
-
-            <strong>Current Location:</strong>
-
-            {{ admission.ward }}
-            /
-            {{ admission.room }}
-            /
-            {{ admission.bed }}
-
-        </div>
-
-
-        <form method="post">
-
-            {% csrf_token %}
-
-            <input
-                type="hidden"
-                name="confirm_transfer"
-                value="1"
-            >
-
-
-            {% if form.non_field_errors %}
-
-                <div
-                    style="
-                        color:#842029;
-                        background:#f8d7da;
-                        padding:12px;
-                        margin-bottom:15px;
-                    "
-                >
-                    {{ form.non_field_errors }}
+        <fieldset class="module aligned">
+            {% for field in form %}
+                <div class="form-row">
+                    <div>
+                        {{ field.errors }}
+                        {{ field.label_tag }}
+                        {{ field }}
+                        {% if field.help_text %}
+                            <div class="help">{{ field.help_text }}</div>
+                        {% endif %}
+                    </div>
                 </div>
+            {% endfor %}
+        </fieldset>
 
-            {% endif %}
-
-
-            <div style="margin-bottom:20px;">
-
-                {{ form.to_ward.label_tag }}
-
-                {{ form.to_ward }}
-
-                {% if form.to_ward.errors %}
-                    <div style="color:#dc3545;">
-                        {{ form.to_ward.errors }}
-                    </div>
-                {% endif %}
-
-            </div>
-
-
-            <div style="margin-bottom:20px;">
-
-                {{ form.to_room.label_tag }}
-
-                {{ form.to_room }}
-
-                {% if form.to_room.errors %}
-                    <div style="color:#dc3545;">
-                        {{ form.to_room.errors }}
-                    </div>
-                {% endif %}
-
-            </div>
-
-
-            <div style="margin-bottom:20px;">
-
-                {{ form.to_bed.label_tag }}
-
-                {{ form.to_bed }}
-
-                {% if form.to_bed.errors %}
-                    <div style="color:#dc3545;">
-                        {{ form.to_bed.errors }}
-                    </div>
-                {% endif %}
-
-            </div>
-
-
-            <div style="margin-bottom:20px;">
-
-                {{ form.reason.label_tag }}
-
-                {{ form.reason }}
-
-            </div>
-
-
-            <div style="margin-bottom:25px;">
-
-                {{ form.notes.label_tag }}
-
-                {{ form.notes }}
-
-            </div>
-
-
-            <div>
-
-                <button
-                    type="submit"
-                    style="
-                        background:#198754;
-                        color:white;
-                        border:0;
-                        padding:10px 20px;
-                        border-radius:5px;
-                        font-weight:600;
-                        cursor:pointer;
-                    "
-                >
-                    Transfer Patient
-                </button>
-
-
-                <a
-                    href="{% url 'admin:ipd_ipdadmission_changelist' %}"
-                    style="
-                        margin-left:10px;
-                        padding:10px 20px;
-                        background:#6c757d;
-                        color:white;
-                        text-decoration:none;
-                        border-radius:5px;
-                    "
-                >
-                    Cancel
-                </a>
-
-            </div>
-
-        </form>
-
-    </div>
-
+        <div class="submit-row">
+            <input type="submit" value="Transfer Bed" class="default">
+            <a href="{% url 'admin:ipd_ipdadmission_changelist' %}"
+               class="closelink">Cancel</a>
+        </div>
+    </form>
 </div>
-
-{% endblock %}s
+{% endblock %}

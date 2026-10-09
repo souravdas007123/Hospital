@@ -1,0 +1,54 @@
+
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Discharge Patient | {{ site_title }}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Discharge Patient</h1>
+
+    <div class="module" style="padding: 20px; margin-bottom: 20px;">
+        <h2>Admission Details</h2>
+        <p><strong>Admission Number:</strong> {{ admission.admission_number }}</p>
+        <p><strong>Patient:</strong> {{ admission.patient }}</p>
+        <p><strong>Doctor:</strong> {{ admission.doctor }}</p>
+        <p><strong>Department:</strong> {{ admission.department }}</p>
+        <p><strong>Ward:</strong> {{ admission.ward }}</p>
+        <p><strong>Room:</strong> {{ admission.room }}</p>
+        <p><strong>Bed:</strong> {{ admission.bed }}</p>
+        <p><strong>Status:</strong> {{ admission.get_status_display }}</p>
+    </div>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="errornote">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
+
+        <fieldset class="module aligned">
+            {% for field in form %}
+                <div class="form-row">
+                    <div>
+                        {{ field.errors }}
+                        {{ field.label_tag }}
+                        {{ field }}
+                        {% if field.help_text %}
+                            <div class="help">{{ field.help_text }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        </fieldset>
+
+        <div class="submit-row">
+            <input type="submit" value="Confirm Discharge" class="default">
+            <a href="{% url 'admin:ipd_ipdadmission_change' admission.pk %}"
+               class="closelink">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

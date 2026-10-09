@@ -1,4 +1,5 @@
-from django.contrib.auth import get_user_model
+
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -7,10 +8,14 @@ from .models import (
     IPDBedTransfer,
     IPDDoctorAssignment,
     IPDDoctorNote,
+    IPDNursingVital,
+    IPDNursingNote,
+    IPDMedicationOrder,
+    IPDMedicationAdministration,
 )
 
 
-User = get_user_model()
+ACTIVE_ADMISSION_STATUSES = ("ADMITTED", "ON_HOLD")
 
 
 # ============================================================
@@ -28,59 +33,36 @@ def transfer_patient_bed(
     notes="",
 ):
     """
-    Transfer an admitted patient from current bed to a new bed.
+    Transfer an admitted patient to another available bed.
+    Transfer history is saved and bed statuses are updated.
     """
 
     admission = (
         IPDAdmission.objects
         .select_for_update()
-        .select_related(
-            "patient",
-            "ward",
-            "room",
-            "bed",
-        )
+        .select_related("patient", "ward", "room", "bed")
         .get(pk=admission.pk)
     )
 
-    # --------------------------------------------------------
-    # Active admission check
-    # --------------------------------------------------------
-
-    if admission.status not in [
-        "ADMITTED",
-        "ON_HOLD",
-    ]:
-        raise ValueError(
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
             "Only an active IPD admission can be transferred."
         )
 
-    if not to_ward:
-        raise ValueError("Destination ward is required.")
+    if not to_ward or not to_room or not to_bed:
+        raise ValidationError(
+            "Destination ward, room and bed are required."
+        )
 
-    if not to_room:
-        raise ValueError("Destination room is required.")
-
-    if not to_bed:
-        raise ValueError("Destination bed is required.")
-
-    # --------------------------------------------------------
-    # Ward / Room / Bed hierarchy
-    # --------------------------------------------------------
-
-    if to_room.ward_id != to_ward.id:
-        raise ValueError(
+    if to_room.ward_id != to_ward.pk:
+        raise ValidationError(
             "Selected room does not belong to the selected ward."
         )
 
-    if to_bed.room_id != to_room.id:
-        raise ValueError(
+    if to_bed.room_id != to_room.pk:
+        raise ValidationError(
             "Selected bed does not belong to the selected room."
         )
-
-    # --------------------------------------------------------
-    # Lock destination bed
-    # --------------------------------------------------------
 
     destination_bed = (
         to_bed.__class__.objects
@@ -88,103 +70,58 @@ def transfer_patient_bed(
         .get(pk=to_bed.pk)
     )
 
-    # --------------------------------------------------------
-    # Same bed
-    # --------------------------------------------------------
-
-    if admission.bed_id == destination_bed.id:
-        raise ValueError(
+    if admission.bed_id == destination_bed.pk:
+        raise ValidationError(
             "Patient is already allocated to this bed."
         )
 
-    # --------------------------------------------------------
-    # Bed availability
-    # --------------------------------------------------------
-
     if destination_bed.status != "AVAILABLE":
-        raise ValueError(
+        raise ValidationError(
             "Selected destination bed is not available."
         )
-
-    # --------------------------------------------------------
-    # Check another active admission
-    # --------------------------------------------------------
 
     destination_occupied = (
         IPDAdmission.objects
         .filter(
             bed=destination_bed,
-            status__in=[
-                "ADMITTED",
-                "ON_HOLD",
-            ],
+            status__in=ACTIVE_ADMISSION_STATUSES,
         )
         .exclude(pk=admission.pk)
         .exists()
     )
 
     if destination_occupied:
-        raise ValueError(
-            "Selected destination bed is already assigned to another patient."
+        raise ValidationError(
+            "Selected destination bed is already assigned "
+            "to another patient."
         )
-
-    # --------------------------------------------------------
-    # Old location
-    # --------------------------------------------------------
 
     old_ward = admission.ward
     old_room = admission.room
     old_bed = admission.bed
 
-    # --------------------------------------------------------
-    # Create transfer history
-    # --------------------------------------------------------
-
     transfer = IPDBedTransfer.objects.create(
         admission=admission,
         patient=admission.patient,
-
         from_ward=old_ward,
         from_room=old_room,
         from_bed=old_bed,
-
         to_ward=to_ward,
         to_room=to_room,
         to_bed=destination_bed,
-
         transfer_date=timezone.now(),
         reason=reason,
         notes=notes,
         transferred_by=user,
     )
 
-    # --------------------------------------------------------
-    # Free old bed
-    # --------------------------------------------------------
-
-    if old_bed:
-        old_bed.status = "AVAILABLE"
-        old_bed.save(
-            update_fields=["status"]
-        )
-
-    # --------------------------------------------------------
-    # Occupy new bed
-    # --------------------------------------------------------
-
+    # Occupy destination bed before updating admission.
     destination_bed.status = "OCCUPIED"
-    destination_bed.save(
-        update_fields=["status"]
-    )
-
-    # --------------------------------------------------------
-    # Update admission
-    # --------------------------------------------------------
+    destination_bed.save(update_fields=["status"])
 
     admission.ward = to_ward
     admission.room = to_room
     admission.bed = destination_bed
-
     admission.save(
         update_fields=[
             "ward",
@@ -193,6 +130,11 @@ def transfer_patient_bed(
             "updated_at",
         ]
     )
+
+    # Release the previous bed only after admission is updated.
+    if old_bed:
+        old_bed.status = "AVAILABLE"
+        old_bed.save(update_fields=["status"])
 
     return transfer
 
@@ -211,16 +153,9 @@ def assign_ipd_doctor(
     notes="",
 ):
     """
-    Assign a doctor to an IPD admission.
-
-    role:
-        PRIMARY
-        CONSULTANT
+    Assign a doctor to an active IPD admission.
+    Supports PRIMARY and CONSULTANT assignments.
     """
-
-    # --------------------------------------------------------
-    # Lock admission
-    # --------------------------------------------------------
 
     admission = (
         IPDAdmission.objects
@@ -228,76 +163,40 @@ def assign_ipd_doctor(
         .get(pk=admission.pk)
     )
 
-    # --------------------------------------------------------
-    # Active admission check
-    # --------------------------------------------------------
-
-    if admission.status not in [
-        "ADMITTED",
-        "ON_HOLD",
-    ]:
-        raise ValueError(
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
             "Doctor can only be assigned to an active IPD admission."
         )
 
-    # --------------------------------------------------------
-    # Doctor validation
-    # --------------------------------------------------------
-
     if not doctor:
-        raise ValueError(
-            "Doctor is required."
-        )
+        raise ValidationError("Doctor is required.")
 
     if doctor.role != "DOCTOR":
-        raise ValueError(
+        raise ValidationError(
             "Selected user is not registered as a Doctor."
         )
 
     if not doctor.is_active:
-        raise ValueError(
-            "Selected doctor is inactive."
-        )
-
-    # --------------------------------------------------------
-    # Validate role
-    # --------------------------------------------------------
+        raise ValidationError("Selected doctor is inactive.")
 
     role = str(role).upper()
 
-    if role not in [
-        "PRIMARY",
-        "CONSULTANT",
-    ]:
-        raise ValueError(
-            "Invalid doctor assignment role."
-        )
+    if role not in ("PRIMARY", "CONSULTANT"):
+        raise ValidationError("Invalid doctor assignment role.")
 
-    # --------------------------------------------------------
-    # Duplicate active assignment
-    # --------------------------------------------------------
-
-    duplicate = (
-        IPDDoctorAssignment.objects
-        .filter(
-            admission=admission,
-            doctor=doctor,
-            is_active=True,
-        )
-        .exists()
-    )
+    duplicate = IPDDoctorAssignment.objects.filter(
+        admission=admission,
+        doctor=doctor,
+        is_active=True,
+    ).exists()
 
     if duplicate:
-        raise ValueError(
-            "This doctor is already actively assigned to this admission."
+        raise ValidationError(
+            "This doctor is already actively assigned "
+            "to this admission."
         )
 
-    # --------------------------------------------------------
-    # PRIMARY doctor
-    # --------------------------------------------------------
-
     if role == "PRIMARY":
-
         existing_primary = (
             IPDDoctorAssignment.objects
             .select_for_update()
@@ -312,7 +211,6 @@ def assign_ipd_doctor(
         if existing_primary:
             existing_primary.is_active = False
             existing_primary.end_date = timezone.now()
-
             existing_primary.save(
                 update_fields=[
                     "is_active",
@@ -320,10 +218,6 @@ def assign_ipd_doctor(
                     "updated_at",
                 ]
             )
-
-    # --------------------------------------------------------
-    # Create doctor assignment
-    # --------------------------------------------------------
 
     assignment = IPDDoctorAssignment.objects.create(
         admission=admission,
@@ -350,56 +244,36 @@ def remove_ipd_doctor(
     reason="",
 ):
     """
-    End an active IPD doctor assignment.
-
-    Primary doctor cannot be removed directly.
+    End an active consultant assignment.
+    A primary doctor cannot be removed directly.
     """
 
     assignment = (
         IPDDoctorAssignment.objects
         .select_for_update()
-        .select_related(
-            "admission",
-            "doctor",
-        )
+        .select_related("admission", "doctor")
         .get(pk=assignment.pk)
     )
 
-    # --------------------------------------------------------
-    # Already inactive
-    # --------------------------------------------------------
-
     if not assignment.is_active:
-        raise ValueError(
+        raise ValidationError(
             "This doctor assignment is already inactive."
         )
 
-    # --------------------------------------------------------
-    # Primary doctor protection
-    # --------------------------------------------------------
-
     if assignment.role == "PRIMARY":
-        raise ValueError(
+        raise ValidationError(
             "Primary doctor cannot be removed directly. "
-            "Please assign a replacement Primary doctor first."
+            "Assign a replacement primary doctor first."
         )
-
-    # --------------------------------------------------------
-    # End assignment
-    # --------------------------------------------------------
 
     assignment.is_active = False
     assignment.end_date = timezone.now()
 
     if reason:
         if assignment.notes:
-            assignment.notes += (
-                f"\nRemoval reason: {reason}"
-            )
+            assignment.notes += f"\nRemoval reason: {reason}"
         else:
-            assignment.notes = (
-                f"Removal reason: {reason}"
-            )
+            assignment.notes = f"Removal reason: {reason}"
 
     assignment.save(
         update_fields=[
@@ -428,73 +302,38 @@ def create_ipd_doctor_note(
     Create a clinical note by an actively assigned IPD doctor.
     """
 
-    # --------------------------------------------------------
-    # Lock admission
-    # --------------------------------------------------------
-
     admission = (
         IPDAdmission.objects
         .select_for_update()
         .get(pk=admission.pk)
     )
 
-    # --------------------------------------------------------
-    # Active admission check
-    # --------------------------------------------------------
-
-    if admission.status not in [
-        "ADMITTED",
-        "ON_HOLD",
-    ]:
-        raise ValueError(
-            "Doctor notes can only be added to an active IPD admission."
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
+            "Doctor notes can only be added to an active admission."
         )
-
-    # --------------------------------------------------------
-    # Note validation
-    # --------------------------------------------------------
 
     if not clinical_note or not clinical_note.strip():
-        raise ValueError(
-            "Clinical note cannot be empty."
-        )
-
-    # --------------------------------------------------------
-    # Doctor validation
-    # --------------------------------------------------------
+        raise ValidationError("Clinical note cannot be empty.")
 
     if not doctor:
-        raise ValueError(
-            "Doctor is required."
-        )
+        raise ValidationError("Doctor is required.")
 
     if doctor.role != "DOCTOR":
-        raise ValueError(
+        raise ValidationError(
             "Selected user is not registered as a Doctor."
         )
 
-    # --------------------------------------------------------
-    # Doctor must be actively assigned
-    # --------------------------------------------------------
-
-    assigned = (
-        IPDDoctorAssignment.objects
-        .filter(
-            admission=admission,
-            doctor=doctor,
-            is_active=True,
-        )
-        .exists()
-    )
+    assigned = IPDDoctorAssignment.objects.filter(
+        admission=admission,
+        doctor=doctor,
+        is_active=True,
+    ).exists()
 
     if not assigned:
-        raise ValueError(
+        raise ValidationError(
             "Doctor must be actively assigned to this IPD admission."
         )
-
-    # --------------------------------------------------------
-    # Create doctor note
-    # --------------------------------------------------------
 
     note = IPDDoctorNote.objects.create(
         admission=admission,
@@ -505,3 +344,353 @@ def create_ipd_doctor_note(
     )
 
     return note
+
+
+# ============================================================
+# IPD NURSING VITALS
+# ============================================================
+
+@transaction.atomic
+def record_ipd_vitals(admission, user, **vitals):
+    """
+    Record nursing vitals for an active IPD admission.
+    """
+
+    admission = (
+        IPDAdmission.objects
+        .select_for_update()
+        .get(pk=admission.pk)
+    )
+
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
+            "Vitals can only be recorded for an active admission."
+        )
+
+    if not user or user.role not in ("NURSE", "ADMIN", "STAFF"):
+        raise ValidationError(
+            "User is not authorized to record IPD vitals."
+        )
+
+    allowed_fields = {
+        "temperature",
+        "systolic_bp",
+        "diastolic_bp",
+        "pulse",
+        "respiratory_rate",
+        "spo2",
+        "weight",
+        "height",
+        "blood_glucose",
+        "pain_score",
+        "nursing_notes",
+    }
+
+    unknown_fields = set(vitals) - allowed_fields
+
+    if unknown_fields:
+        raise ValidationError(
+            "Unsupported vital fields: "
+            + ", ".join(sorted(unknown_fields))
+        )
+
+    vital = IPDNursingVital(
+        admission=admission,
+        patient=admission.patient,
+        recorded_by=user,
+        **vitals,
+    )
+
+    vital.full_clean()
+    vital.save()
+
+    return vital
+
+
+# ============================================================
+# IPD NURSING NOTE
+# ============================================================
+
+@transaction.atomic
+def create_ipd_nursing_note(
+    admission,
+    nurse,
+    notes,
+    note_type=IPDNursingNote.NoteType.OBSERVATION,
+    intake_ml=None,
+    output_ml=None,
+):
+    """
+    Create a nursing note for an active IPD admission.
+    """
+
+    admission = (
+        IPDAdmission.objects
+        .select_for_update()
+        .get(pk=admission.pk)
+    )
+
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
+            "Notes can only be added to an active admission."
+        )
+
+    if not nurse or nurse.role not in ("NURSE", "ADMIN", "STAFF"):
+        raise ValidationError(
+            "User is not authorized to create nursing notes."
+        )
+
+    note = IPDNursingNote(
+        admission=admission,
+        patient=admission.patient,
+        nurse=nurse,
+        notes=notes,
+        note_type=note_type,
+        intake_ml=intake_ml,
+        output_ml=output_ml,
+    )
+
+    note.full_clean()
+    note.save()
+
+    return note
+
+
+# ============================================================
+# IPD MEDICATION ORDER
+# ============================================================
+
+@transaction.atomic
+def create_ipd_medication_order(
+    admission,
+    medicine,
+    prescribed_by,
+    dose,
+    frequency,
+    start_date,
+    end_date,
+    quantity=1,
+    duration_days=1,
+    route="ORAL",
+    instructions="",
+):
+    """
+    Create a medication order for an active IPD admission.
+    """
+
+    admission = (
+        IPDAdmission.objects
+        .select_for_update()
+        .get(pk=admission.pk)
+    )
+
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
+            "Medication orders require an active admission."
+        )
+
+    if not prescribed_by or prescribed_by.role != "DOCTOR":
+        raise ValidationError(
+            "Only doctors can prescribe medication."
+        )
+
+    if not medicine or not medicine.is_active:
+        raise ValidationError("This medicine is inactive or missing.")
+
+    order = IPDMedicationOrder(
+        admission=admission,
+        patient=admission.patient,
+        medicine=medicine,
+        prescribed_by=prescribed_by,
+        dose=dose,
+        frequency=frequency,
+        start_date=start_date,
+        end_date=end_date,
+        quantity=quantity,
+        duration_days=duration_days,
+        route=route,
+        instructions=instructions,
+    )
+
+    order.full_clean()
+    order.save()
+
+    return order
+
+
+# ============================================================
+# IPD MEDICATION ADMINISTRATION
+# ============================================================
+
+@transaction.atomic
+def record_ipd_medication_administration(
+    medication_order,
+    user,
+    status,
+    scheduled_at,
+    quantity_given=0,
+    medicine_batch=None,
+    reason="",
+    notes="",
+):
+    """
+    Record a medication dose as given, missed, refused,
+    held or not available.
+
+    Pharmacy stock deduction is intentionally not performed here.
+    """
+
+    order = (
+        IPDMedicationOrder.objects
+        .select_for_update()
+        .select_related("admission", "patient", "medicine")
+        .get(pk=medication_order.pk)
+    )
+
+    if order.status != IPDMedicationOrder.Status.ACTIVE:
+        raise ValidationError("This medication order is not active.")
+
+    if order.admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError("Patient admission is not active.")
+
+    if not user or user.role not in ("NURSE", "ADMIN"):
+        raise ValidationError(
+            "Only authorized nursing staff or administrators "
+            "can record medication administration."
+        )
+
+    if status not in IPDMedicationAdministration.Status.values:
+        raise ValidationError(
+            "Invalid medication administration status."
+        )
+
+    administered_at = (
+        timezone.now()
+        if status == IPDMedicationAdministration.Status.GIVEN
+        else None
+    )
+
+    if status == IPDMedicationAdministration.Status.GIVEN:
+        if medicine_batch is None:
+            raise ValidationError(
+                "A medicine batch is required when recording "
+                "a dose as given."
+            )
+
+        medicine_batch = (
+            medicine_batch.__class__.objects
+            .select_for_update()
+            .get(pk=medicine_batch.pk)
+        )
+
+        if medicine_batch.medicine_id != order.medicine_id:
+            raise ValidationError(
+                "Selected batch does not belong to the prescribed medicine."
+            )
+
+        if medicine_batch.expiry_date < timezone.localdate():
+            raise ValidationError(
+                "Expired medicine cannot be administered."
+            )
+
+        if quantity_given <= 0:
+            raise ValidationError(
+                "Quantity given must be greater than zero."
+            )
+
+        if medicine_batch.available_quantity < quantity_given:
+            raise ValidationError(
+                "Insufficient stock in the selected medicine batch."
+            )
+
+    record = IPDMedicationAdministration(
+        medication_order=order,
+        admission=order.admission,
+        patient=order.patient,
+        medicine_batch=medicine_batch,
+        scheduled_at=scheduled_at,
+        administered_at=administered_at,
+        administered_by=user,
+        quantity_given=quantity_given,
+        status=status,
+        reason=reason,
+        notes=notes,
+    )
+
+    record.full_clean()
+    record.save()
+
+    # Stock deduction must be integrated with the pharmacy
+    # stock service before using this workflow in production.
+    return record
+
+
+# ============================================================
+# IPD PATIENT DISCHARGE
+# ============================================================
+
+@transaction.atomic
+def discharge_ipd_patient(
+    admission,
+    user,
+    final_diagnosis,
+    treatment_summary,
+    discharge_instructions,
+    discharge_disposition,
+):
+    """
+    Discharge an active IPD admission.
+
+    Required:
+        - Final diagnosis
+        - Treatment summary
+        - Discharge instructions
+        - Valid discharge disposition
+
+    The IPDAdmission model's save() method is expected to
+    update the bed status when admission status becomes DISCHARGED.
+    """
+
+    admission = (
+        IPDAdmission.objects
+        .select_for_update()
+        .select_related("patient", "ward", "room", "bed")
+        .get(pk=admission.pk)
+    )
+
+    if admission.status not in ACTIVE_ADMISSION_STATUSES:
+        raise ValidationError(
+            "Only an active IPD admission can be discharged."
+        )
+
+    final_diagnosis = (final_diagnosis or "").strip()
+    treatment_summary = (treatment_summary or "").strip()
+    discharge_instructions = (discharge_instructions or "").strip()
+
+    if not final_diagnosis:
+        raise ValidationError("Final diagnosis is required.")
+
+    if not treatment_summary:
+        raise ValidationError("Treatment summary is required.")
+
+    if not discharge_instructions:
+        raise ValidationError("Discharge instructions are required.")
+
+    valid_dispositions = {
+        value
+        for value, label in IPDAdmission.DischargeDisposition.choices
+    }
+
+    if discharge_disposition not in valid_dispositions:
+        raise ValidationError("Invalid discharge disposition.")
+
+    admission.final_diagnosis = final_diagnosis
+    admission.treatment_summary = treatment_summary
+    admission.discharge_instructions = discharge_instructions
+    admission.discharge_disposition = discharge_disposition
+    admission.discharge_date = timezone.now()
+    admission.status = "DISCHARGED"
+
+    admission.save()
+
+    return admission
