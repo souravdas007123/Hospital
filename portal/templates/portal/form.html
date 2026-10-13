@@ -1,0 +1,91 @@
+{% extends "portal/base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ page_title }}</h1>
+    <div class="muted">Fields marked <span style="color:var(--bad)">*</span> are required.</div>
+  </div>
+  <a class="btn" href="{{ cancel_url }}">← Back to {{ entity.plural }}</a>
+</div>
+
+<form method="post" enctype="multipart/form-data" novalidate>
+  {% csrf_token %}
+
+  <div class="card">
+    {% if form.non_field_errors %}
+      <div class="msg">
+        {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+      </div>
+    {% endif %}
+
+    {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+
+    <div class="form-grid">
+      {% for field in form.visible_fields %}
+        <div class="fld{% if field.widget_type == 'textarea' %} wide{% endif %}{% if field.widget_type == 'checkbox' %} check{% endif %}">
+          {% if field.widget_type == 'checkbox' %}
+            {{ field }}
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {% else %}
+            <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="req">*</span>{% endif %}</label>
+            {{ field }}
+          {% endif %}
+          {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+          {% for error in field.errors %}<div class="err">{{ error }}</div>{% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if formset %}
+    <div class="card">
+      <h3>{{ inline_title }}</h3>
+      {{ formset.management_form }}
+
+      {% if formset.non_form_errors %}
+        <div class="msg">{% for error in formset.non_form_errors %}<div>{{ error }}</div>{% endfor %}</div>
+      {% endif %}
+
+      <div class="table-wrap">
+        <table class="data lines">
+          <thead>
+            <tr>
+              {% for field in formset.empty_form.visible_fields %}
+                {% if field.name != "DELETE" %}<th>{{ field.label }}</th>{% endif %}
+              {% endfor %}
+              <th>Remove</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in formset %}
+              <tr>
+                {% for hidden in line.hidden_fields %}{{ hidden }}{% endfor %}
+                {% for field in line.visible_fields %}
+                  {% if field.name != "DELETE" %}
+                    <td>
+                      {{ field }}
+                      {% if field.help_text %}<div class="muted" style="font-size:11px">{{ field.help_text }}</div>{% endif %}
+                      {% for error in field.errors %}<div class="err">{{ error }}</div>{% endfor %}
+                    </td>
+                  {% endif %}
+                {% endfor %}
+                <td>{% if line.instance.pk %}{{ line.DELETE }}{% else %}<span class="muted">—</span>{% endif %}</td>
+              </tr>
+              {% if line.non_field_errors %}
+                <tr><td class="err" colspan="6">{% for error in line.non_field_errors %}{{ error }} {% endfor %}</td></tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:8px">Leave unused rows empty. Save to add more rows.</div>
+    </div>
+  {% endif %}
+
+  <div class="form-actions">
+    <button class="primary" type="submit">{{ submit_label }}</button>
+    <a class="btn" href="{{ cancel_url }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

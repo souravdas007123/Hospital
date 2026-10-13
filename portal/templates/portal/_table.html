@@ -3,7 +3,7 @@
     <thead>
       <tr>
         {% for h in table.headers %}<th{% if h.num %} class="num"{% endif %}>{{ h.label }}</th>{% endfor %}
-        {% if table.has_links %}<th></th>{% endif %}
+        {% if table.has_actions %}<th></th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -14,8 +14,11 @@
               {% if cell.badge %}<span class="badge {{ cell.badge }}">{{ cell.text }}</span>{% else %}{{ cell.text }}{% endif %}
             </td>
           {% endfor %}
-          {% if table.has_links %}
-            <td class="act">{% if row.url %}<a href="{{ row.url }}">Open</a>{% endif %}</td>
+          {% if table.has_actions %}
+            <td class="act">
+              {% if row.edit_url %}<a href="{{ row.edit_url }}">Edit</a>{% endif %}
+              {% if row.delete_url %}<a class="del" href="{{ row.delete_url }}">Delete</a>{% endif %}
+            </td>
           {% endif %}
         </tr>
       {% empty %}

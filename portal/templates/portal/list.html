@@ -6,22 +6,27 @@
     <h1>{{ title }}</h1>
     <div class="muted">{{ subtitle }} · {{ total }} record{{ total|pluralize }}</div>
   </div>
+  {% if can_add %}
+    <a class="btn primary" href="{{ new_url }}">+ New {{ entity.title }}</a>
+  {% endif %}
 </div>
 
 <form method="get" class="toolbar">
   <div class="f">
     <label for="q">Search</label>
-    <input id="q" type="search" name="q" value="{{ query }}" placeholder="Name, number, phone…" autofocus>
+    <input id="q" type="search" name="q" value="{{ query }}" placeholder="Name, number, phone…">
   </div>
-  <div class="f sel">
-    <label for="filter">Filter</label>
-    <select id="filter" name="filter">
-      <option value="">{{ filter_label }}</option>
-      {% for value, label in filter_choices %}
-        <option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-  </div>
+  {% if entity.filter_choices %}
+    <div class="f sel">
+      <label for="filter">Filter</label>
+      <select id="filter" name="filter">
+        <option value="">{{ entity.filter_label }}</option>
+        {% for value, label in entity.filter_choices %}
+          <option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  {% endif %}
   <div>
     <button class="primary" type="submit">Search</button>
     {% if query or selected %}<a class="btn" href="?">Clear</a>{% endif %}

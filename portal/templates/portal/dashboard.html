@@ -8,6 +8,14 @@
   </div>
 </div>
 
+{% if quick_actions %}
+  <div class="quick">
+    {% for action in quick_actions %}
+      <a class="btn{% if forloop.first %} primary{% endif %}" href="{{ action.url }}">+ {{ action.label }}</a>
+    {% endfor %}
+  </div>
+{% endif %}
+
 {% if stats %}
   <div class="stats">
     {% for s in stats %}

@@ -1,19 +1,19 @@
-"""Hospital portal: dashboard and searchable list pages.
+"""Hospital portal: dashboard, searchable lists and add / edit / delete pages.
 
-Read-only front end that sits on top of the existing apps. Access to every
-section follows the normal Django model permissions, so the role groups
-created by ``manage.py setup_roles`` decide who sees what.
+Everything is driven by ``registry.ENTITIES``. Access to each action follows
+the normal Django model permissions (view / add / change / delete), so the
+role groups created by ``manage.py setup_roles`` decide who can do what.
 """
 
-from datetime import date, datetime, time
-
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import ProtectedError, Q, RestrictedError
 from django.http import Http404
-from django.shortcuts import render
-from django.urls import NoReverseMatch, reverse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from appointments.models import Appointment
@@ -23,151 +23,74 @@ from laboratory.models import LabOrder
 from opd.models import OPDVisit
 from patients.models import Patient
 
+from .registry import ENTITIES, GROUP_ORDER
+from .utils import build_cell, doctor_profile_name, person_name
+
 
 PAGE_SIZE = 25
 
 
 # ---------------------------------------------------------------------------
-# Small helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
-def person_name(user):
-    """Readable name for a user, falling back to the username."""
-    if user is None:
-        return None
-    return user.get_full_name() or user.get_username()
+def get_entity(section):
+    entity = ENTITIES.get(section)
+
+    if entity is None:
+        raise Http404("Unknown section.")
+
+    return entity
 
 
-def doctor_profile_name(doctor):
-    """Name for a doctors.Doctor row (the name lives on its user)."""
-    if doctor is None:
-        return None
-    name = person_name(doctor.user)
-    return f"Dr. {name}" if name else None
+def require(user, perm):
+    if not user.has_perm(perm):
+        raise PermissionDenied
 
 
-def user_doctor_name(user):
-    name = person_name(user)
-    return f"Dr. {name}" if name else None
+def list_url(entity):
+    return reverse("portal:list", kwargs={"section": entity.key})
 
 
-def format_value(value):
-    if value is None or value == "":
-        return "—"
-    if isinstance(value, bool):
-        return "Yes" if value else "No"
-    if isinstance(value, datetime):
-        if timezone.is_aware(value):
-            value = timezone.localtime(value)
-        return value.strftime("%d %b %Y, %I:%M %p")
-    if isinstance(value, date):
-        return value.strftime("%d %b %Y")
-    if isinstance(value, time):
-        return value.strftime("%I:%M %p")
-    return str(value)
-
-
-def resolve(obj, accessor):
-    """Follow a dotted attribute path (or call a function) on ``obj``."""
-    if callable(accessor):
-        return accessor(obj)
-
-    current = obj
-    for part in accessor.split("."):
-        if current is None:
-            return None
-        current = getattr(current, part, None)
-        if callable(current):
-            current = current()
-    return current
-
-
-def build_cell(obj, accessor, kind=None):
-    """Turn one model attribute into something the table template can draw."""
-    if kind == "status":
-        raw = getattr(obj, accessor)
-        display = getattr(obj, f"get_{accessor}_display")()
-        return {"text": display, "badge": f"s-{str(raw).lower()}"}
-
-    if kind == "active":
-        on = bool(getattr(obj, accessor))
-        return {
-            "text": "Active" if on else "Inactive",
-            "badge": "s-active" if on else "s-inactive",
-        }
-
-    if kind == "urgent":
-        on = bool(getattr(obj, accessor))
-        return {
-            "text": "STAT" if on else "Routine",
-            "badge": "s-stat" if on else "s-routine",
-        }
-
-    text = format_value(resolve(obj, accessor))
-
-    if kind == "trunc" and len(text) > 60:
-        text = text[:57] + "…"
-
-    return {"text": text, "kind": kind}
-
-
-def admin_change_url(obj, user):
-    """Link to the admin edit page, only for staff who may change the row."""
-    opts = obj._meta
-
-    if not (
-        user.is_staff
-        and user.has_perm(f"{opts.app_label}.change_{opts.model_name}")
-    ):
-        return None
-
-    try:
-        return reverse(
-            f"admin:{opts.app_label}_{opts.model_name}_change",
-            args=[obj.pk],
-        )
-    except NoReverseMatch:
-        return None
-
-
-def make_table(objects, columns, user):
+def make_table(objects, columns, user=None, entity=None):
     """columns: list of (label, accessor, kind) tuples."""
     headers = [
         {"label": label, "num": kind == "num"}
         for label, _accessor, kind in columns
     ]
 
+    can_edit = bool(entity and user and user.has_perm(entity.perm("change")))
+    can_delete = bool(entity and user and user.has_perm(entity.perm("delete")))
+
     rows = []
     for obj in objects:
+        edit_url = delete_url = None
+
+        if can_edit:
+            edit_url = reverse(
+                "portal:edit", kwargs={"section": entity.key, "pk": obj.pk}
+            )
+        if can_delete:
+            delete_url = reverse(
+                "portal:delete", kwargs={"section": entity.key, "pk": obj.pk}
+            )
+
         rows.append(
             {
                 "cells": [
                     build_cell(obj, accessor, kind)
                     for _label, accessor, kind in columns
                 ],
-                "url": admin_change_url(obj, user),
+                "edit_url": edit_url,
+                "delete_url": delete_url,
             }
         )
 
     return {
         "headers": headers,
         "rows": rows,
-        "has_links": any(row["url"] for row in rows),
+        "has_actions": can_edit or can_delete,
     }
-
-
-# ---------------------------------------------------------------------------
-# Navigation / shared context
-# ---------------------------------------------------------------------------
-
-NAV_ITEMS = [
-    ("dashboard", "Dashboard", "portal:dashboard", None),
-    ("patients", "Patients", "portal:list", "patients.view_patient"),
-    ("appointments", "Appointments", "portal:list", "appointments.view_appointment"),
-    ("opd", "OPD Visits", "portal:list", "opd.view_opdvisit"),
-    ("ipd", "IPD Admissions", "portal:list", "ipd.view_ipdadmission"),
-    ("lab-orders", "Lab Orders", "portal:list", "laboratory.view_laborder"),
-]
 
 
 def base_context(request, active):
@@ -178,193 +101,40 @@ def base_context(request, active):
         .first()
     )
 
-    nav = []
-    for key, label, url_name, perm in NAV_ITEMS:
-        if perm and not request.user.has_perm(perm):
-            continue
-        if key == "dashboard":
-            url = reverse(url_name)
-        else:
-            url = reverse(url_name, kwargs={"section": key})
-        nav.append({"key": key, "label": label, "url": url})
+    groups = []
+    for group in GROUP_ORDER:
+        items = [
+            {
+                "key": entity.key,
+                "label": entity.plural,
+                "url": list_url(entity),
+            }
+            for entity in ENTITIES.values()
+            if entity.group == group
+            and request.user.has_perm(entity.perm("view"))
+        ]
+        if items:
+            groups.append({"title": group, "items": items})
 
     return {
         "hospital": hospital,
         "hospital_name": hospital.name if hospital else "Hospital Management",
-        "nav": nav,
+        "nav_groups": groups,
         "active": active,
         "today": timezone.localdate(),
     }
 
 
 # ---------------------------------------------------------------------------
-# Section configuration (list pages)
-# ---------------------------------------------------------------------------
-
-PATIENT_SEARCH = [
-    "patient__uhid",
-    "patient__first_name",
-    "patient__last_name",
-    "patient__phone",
-]
-
-SECTIONS = {
-    "patients": {
-        "title": "Patients",
-        "subtitle": "Registered patients",
-        "perm": "patients.view_patient",
-        "queryset": lambda: Patient.objects.all(),
-        "ordering": ("-registration_date", "-id"),
-        "search": [
-            "uhid", "first_name", "middle_name", "last_name",
-            "phone", "email", "city",
-        ],
-        "filter_field": "gender",
-        "filter_label": "All genders",
-        "filter_choices": Patient.Gender.choices,
-        "columns": [
-            ("UHID", "uhid", "mono"),
-            ("Patient", "full_name", None),
-            ("Gender", "get_gender_display", None),
-            ("Blood group", "get_blood_group_display", None),
-            ("Phone", "phone", None),
-            ("City", "city", None),
-            ("Registered", "registration_date", None),
-            ("Status", "is_active", "active"),
-        ],
-    },
-    "appointments": {
-        "title": "Appointments",
-        "subtitle": "Booked, ongoing and past appointments",
-        "perm": "appointments.view_appointment",
-        "queryset": lambda: Appointment.objects.select_related(
-            "patient", "doctor__user", "department"
-        ),
-        "ordering": ("-appointment_date", "start_time", "-id"),
-        "search": PATIENT_SEARCH + [
-            "appointment_number",
-            "doctor__user__first_name",
-            "doctor__user__last_name",
-            "department__name",
-        ],
-        "filter_field": "status",
-        "filter_label": "All statuses",
-        "filter_choices": Appointment.Status.choices,
-        "columns": [
-            ("Appt no.", "appointment_number", "mono"),
-            ("Patient", "patient.full_name", None),
-            ("Doctor", lambda o: doctor_profile_name(o.doctor), None),
-            ("Department", "department.name", None),
-            ("Date", "appointment_date", None),
-            ("Time", "start_time", None),
-            ("Token", "token_number", "num"),
-            ("Type", "get_appointment_type_display", None),
-            ("Status", "status", "status"),
-        ],
-    },
-    "opd": {
-        "title": "OPD Visits",
-        "subtitle": "Outpatient visits and consultations",
-        "perm": "opd.view_opdvisit",
-        "queryset": lambda: OPDVisit.objects.select_related(
-            "patient", "doctor__user", "department"
-        ),
-        "ordering": ("-visit_date", "-id"),
-        "search": PATIENT_SEARCH + [
-            "visit_number",
-            "doctor__user__first_name",
-            "doctor__user__last_name",
-            "department__name",
-            "chief_complaint",
-        ],
-        "filter_field": "status",
-        "filter_label": "All statuses",
-        "filter_choices": OPDVisit.Status.choices,
-        "columns": [
-            ("Visit no.", "visit_number", "mono"),
-            ("Patient", "patient.full_name", None),
-            ("Doctor", lambda o: doctor_profile_name(o.doctor), None),
-            ("Department", "department.name", None),
-            ("Visit date", "visit_date", None),
-            ("Complaint", "chief_complaint", "trunc"),
-            ("Status", "status", "status"),
-        ],
-    },
-    "ipd": {
-        "title": "IPD Admissions",
-        "subtitle": "Inpatient admissions and bed allocation",
-        "perm": "ipd.view_ipdadmission",
-        "queryset": lambda: IPDAdmission.objects.select_related(
-            "patient", "doctor", "ward", "room", "bed"
-        ),
-        "ordering": ("-admission_date", "-id"),
-        "search": PATIENT_SEARCH + [
-            "admission_number",
-            "doctor__first_name",
-            "doctor__last_name",
-            "ward__name",
-            "room__room_number",
-            "bed__bed_number",
-        ],
-        "filter_field": "status",
-        "filter_label": "All statuses",
-        "filter_choices": IPDAdmission.Status.choices,
-        "columns": [
-            ("Admission no.", "admission_number", "mono"),
-            ("Patient", "patient.full_name", None),
-            ("Doctor", lambda o: user_doctor_name(o.doctor), None),
-            ("Ward", "ward.name", None),
-            ("Room", "room.room_number", None),
-            ("Bed", "bed.bed_number", None),
-            ("Admitted on", "admission_date", None),
-            ("Type", "get_admission_type_display", None),
-            ("Status", "status", "status"),
-        ],
-    },
-    "lab-orders": {
-        "title": "Lab Orders",
-        "subtitle": "Laboratory orders and their progress",
-        "perm": "laboratory.view_laborder",
-        "queryset": lambda: LabOrder.objects.select_related(
-            "patient", "doctor"
-        ),
-        "ordering": ("-order_date", "-id"),
-        "search": PATIENT_SEARCH + [
-            "order_number",
-            "doctor__first_name",
-            "doctor__last_name",
-        ],
-        "filter_field": "status",
-        "filter_label": "All statuses",
-        "filter_choices": LabOrder.Status.choices,
-        "columns": [
-            ("Order no.", "order_number", "mono"),
-            ("Patient", "patient.full_name", None),
-            ("Ordered by", lambda o: user_doctor_name(o.doctor), None),
-            ("Ordered on", "order_date", None),
-            ("Priority", "priority", "urgent"),
-            ("Amount", "total_amount", "num"),
-            ("Status", "status", "status"),
-        ],
-    },
-}
-
-
-# ---------------------------------------------------------------------------
-# Views
+# List
 # ---------------------------------------------------------------------------
 
 @login_required
-def section_list(request, section):
-    config = SECTIONS.get(section)
+def entity_list(request, section):
+    entity = get_entity(section)
+    require(request.user, entity.perm("view"))
 
-    if config is None:
-        raise Http404("Unknown section.")
-
-    if not request.user.has_perm(config["perm"]):
-        raise PermissionDenied
-
-    queryset = config["queryset"]()
+    queryset = entity.queryset()
 
     # --- search: every word must match at least one of the search fields ---
     query = request.GET.get("q", "").strip()
@@ -372,20 +142,21 @@ def section_list(request, section):
     if query:
         for term in query.split():
             clause = Q()
-            for field in config["search"]:
+            for field in entity.search:
                 clause |= Q(**{f"{field}__icontains": term})
             queryset = queryset.filter(clause)
 
-    # --- single dropdown filter (status / gender) ---
+    # --- single dropdown filter (status / gender / active ...) ---
     selected = request.GET.get("filter", "").strip()
-    valid_values = {value for value, _label in config["filter_choices"]}
+    valid_values = {value for value, _label in entity.filter_choices}
 
-    if selected in valid_values:
-        queryset = queryset.filter(**{config["filter_field"]: selected})
+    if entity.filter_field and selected in valid_values:
+        value = entity.filter_cast(selected) if entity.filter_cast else selected
+        queryset = queryset.filter(**{entity.filter_field: value})
     else:
         selected = ""
 
-    queryset = queryset.order_by(*config["ordering"])
+    queryset = queryset.order_by(*entity.ordering)
 
     paginator = Paginator(queryset, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
@@ -393,23 +164,177 @@ def section_list(request, section):
     params = request.GET.copy()
     params.pop("page", None)
 
-    context = base_context(request, section)
+    context = base_context(request, entity.key)
     context.update(
         {
-            "title": config["title"],
-            "subtitle": config["subtitle"],
-            "table": make_table(page.object_list, config["columns"], request.user),
+            "entity": entity,
+            "title": entity.plural,
+            "subtitle": entity.subtitle,
+            "table": make_table(
+                page.object_list, entity.columns, request.user, entity
+            ),
             "page": page,
             "total": paginator.count,
             "query": query,
             "selected": selected,
-            "filter_label": config["filter_label"],
-            "filter_choices": config["filter_choices"],
+            "can_add": request.user.has_perm(entity.perm("add")),
+            "new_url": reverse("portal:new", kwargs={"section": entity.key}),
             "querystring": params.urlencode(),
         }
     )
 
     return render(request, "portal/list.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Add / edit
+# ---------------------------------------------------------------------------
+
+@login_required
+def entity_form(request, section, pk=None):
+    entity = get_entity(section)
+
+    obj = get_object_or_404(entity.model, pk=pk) if pk is not None else None
+
+    action = "change" if obj is not None else "add"
+    require(request.user, entity.perm(action))
+
+    if obj is not None and entity.guard:
+        problem = entity.guard(obj, request, "change")
+        if problem:
+            messages.error(request, problem)
+            return redirect(list_url(entity))
+
+    is_post = request.method == "POST"
+    data = request.POST if is_post else None
+    files = request.FILES if is_post else None
+
+    form = entity.get_form_class()(
+        data, files, instance=obj, request=request
+    )
+
+    formset = None
+    if entity.inline:
+        formset_class = entity.inline(extra=2 if obj is not None else 5)
+        formset = formset_class(
+            data, files, instance=form.instance, prefix="lines"
+        )
+
+    if is_post:
+        form_ok = form.is_valid()
+        formset_ok = formset.is_valid() if formset is not None else True
+
+        if form_ok and formset_ok:
+            try:
+                with transaction.atomic():
+                    instance = form.save(commit=False)
+
+                    if (
+                        obj is None
+                        and hasattr(instance, "created_by_id")
+                        and instance.created_by_id is None
+                    ):
+                        instance.created_by = request.user
+
+                    if entity.before_save:
+                        entity.before_save(instance, request)
+
+                    instance.save()
+                    form.save_m2m()
+
+                    if formset is not None:
+                        formset.save()
+
+                    if entity.after_save:
+                        entity.after_save(instance)
+
+            except ValidationError as exc:
+                # Model-level checks that only run inside save().
+                for message in exc.messages:
+                    form.add_error(None, message)
+            else:
+                messages.success(
+                    request,
+                    f"{entity.title} “{instance}” was "
+                    f"{'updated' if obj is not None else 'created'}.",
+                )
+                return redirect(list_url(entity))
+
+    context = base_context(request, entity.key)
+    context.update(
+        {
+            "entity": entity,
+            "form": form,
+            "formset": formset,
+            "inline_title": entity.inline_title,
+            "page_title": (
+                f"Edit {entity.title}" if obj is not None
+                else f"New {entity.title}"
+            ),
+            "submit_label": "Save changes" if obj is not None else "Create",
+            "cancel_url": list_url(entity),
+        }
+    )
+
+    return render(request, "portal/form.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+@login_required
+def entity_delete(request, section, pk):
+    entity = get_entity(section)
+    obj = get_object_or_404(entity.model, pk=pk)
+
+    require(request.user, entity.perm("delete"))
+
+    if entity.guard:
+        problem = entity.guard(obj, request, "delete")
+        if problem:
+            messages.error(request, problem)
+            return redirect(list_url(entity))
+
+    if request.method == "POST":
+        label = str(obj)
+
+        try:
+            obj.delete()
+        except (ProtectedError, RestrictedError):
+            messages.error(
+                request,
+                f"“{label}” cannot be deleted because other records depend "
+                "on it. Mark it inactive instead.",
+            )
+        else:
+            messages.success(request, f"{entity.title} “{label}” was deleted.")
+
+        return redirect(list_url(entity))
+
+    context = base_context(request, entity.key)
+    context.update(
+        {
+            "entity": entity,
+            "object": obj,
+            "cancel_url": list_url(entity),
+        }
+    )
+
+    return render(request, "portal/confirm_delete.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+QUICK_ACTIONS = [
+    ("patients", "New patient"),
+    ("appointments", "Book appointment"),
+    ("opd", "New OPD visit"),
+    ("ipd", "Admit patient"),
+    ("lab-orders", "New lab order"),
+]
 
 
 @login_required
@@ -457,7 +382,6 @@ def dashboard(request):
                 ("Time", "start_time", None),
                 ("Status", "status", "status"),
             ],
-            user,
         )
 
     if user.has_perm("opd.view_opdvisit"):
@@ -500,7 +424,6 @@ def dashboard(request):
                 ("Bed", "bed.bed_number", None),
                 ("Admitted on", "admission_date", None),
             ],
-            user,
         )
 
     if user.has_perm("hospitals.view_bed"):
@@ -513,7 +436,7 @@ def dashboard(request):
                 "label": "Beds available",
                 "value": f"{available_beds} / {total_beds}",
                 "note": f"{total_beds - available_beds} in use or unavailable",
-                "url": None,
+                "url": reverse("portal:list", kwargs={"section": "beds"}),
             }
         )
 
@@ -534,10 +457,20 @@ def dashboard(request):
             }
         )
 
+    quick_actions = [
+        {
+            "label": label,
+            "url": reverse("portal:new", kwargs={"section": key}),
+        }
+        for key, label in QUICK_ACTIONS
+        if user.has_perm(ENTITIES[key].perm("add"))
+    ]
+
     context = base_context(request, "dashboard")
     context.update(
         {
             "stats": stats,
+            "quick_actions": quick_actions,
             "appointments_table": tables.get("appointments"),
             "admissions_table": tables.get("admissions"),
             "display_name": person_name(user),
