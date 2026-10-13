@@ -119,9 +119,19 @@
   table.data tbody tr:last-child td { border-bottom:0; }
   .num { text-align:right; font-variant-numeric:tabular-nums; }
   .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
-  td.act { text-align:right; white-space:nowrap; }
-  td.act a + a { margin-left:12px; }
-  td.act a.del { color:var(--bad); }
+  td.act { text-align:right; }
+  td.act .acts { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  form.inline { display:inline; margin:0; }
+  .rb { display:inline-block; padding:3px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; font-weight:600; line-height:1.5; background:var(--card); color:var(--ink); cursor:pointer; text-decoration:none; white-space:nowrap; }
+  .rb:hover { background:var(--out); text-decoration:none; }
+  .rb.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .rb.primary:hover { filter:brightness(1.1); }
+  .rb.danger { color:var(--bad); }
+  nav.side details { margin:0; }
+  nav.side summary { cursor:pointer; list-style:none; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:12px 10px 4px; user-select:none; }
+  nav.side summary::-webkit-details-marker { display:none; }
+  nav.side summary::before { content:"▸ "; }
+  nav.side details[open] > summary::before { content:"▾ "; }
   td.empty { text-align:center; color:var(--muted); padding:36px 12px; }
 
   /* badges */
@@ -132,6 +142,13 @@
   .s-completed, .s-consultation_completed, .s-discharged, .s-active, .s-available { background:var(--ok-soft); color:var(--ok); }
   .s-cancelled, .s-no_show, .s-maintenance, .s-blocked { background:var(--bad-soft); color:var(--bad); }
   .s-draft, .s-referred, .s-inactive, .s-routine { background:var(--grey-soft); color:var(--muted); }
+  /* laboratory, pharmacy and other statuses */
+  .s-pending, .s-unpaid, .s-ready, .s-collected { background:var(--warn-soft); color:var(--warn); }
+  .s-received, .s-entered, .s-partially_dispensed, .s-partially_paid, .s-amended { background:var(--info-soft); color:var(--brand); }
+  .s-verified, .s-processed, .s-dispensed, .s-paid, .s-final { background:var(--ok-soft); color:var(--ok); }
+  .s-rejected { background:var(--bad-soft); color:var(--bad); }
+  .s-missed, .s-refused, .s-held, .s-not_available { background:var(--warn-soft); color:var(--warn); }
+  .s-given { background:var(--ok-soft); color:var(--ok); }
 
   /* forms */
   .form-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px 18px; }
@@ -156,7 +173,8 @@
   @media (max-width: 860px) {
     .shell { display:block; }
     nav.side { width:auto; min-height:0; max-height:none; position:static; display:flex; gap:6px; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line); padding:8px; }
-    nav.side .label { display:none; }
+    nav.side .label, nav.side summary { display:none; }
+    nav.side details { display:contents; }
     nav.side a { white-space:nowrap; margin:0; }
     main { padding:12px; }
     .grid2 { grid-template-columns:1fr; }
@@ -185,10 +203,12 @@
   <nav class="side">
     <a href="{% url 'portal:dashboard' %}"{% if active == "dashboard" %} class="active"{% endif %}>Dashboard</a>
     {% for group in nav_groups %}
-      <div class="label">{{ group.title }}</div>
-      {% for item in group.items %}
-        <a href="{{ item.url }}"{% if item.key == active %} class="active"{% endif %}>{{ item.label }}</a>
-      {% endfor %}
+      <details{% if group.open %} open{% endif %}>
+        <summary>{{ group.title }}</summary>
+        {% for item in group.items %}
+          <a href="{{ item.url }}"{% if item.key == active %} class="active"{% endif %}>{{ item.label }}</a>
+        {% endfor %}
+      </details>
     {% endfor %}
     {% if user.is_staff %}
       <div class="label">Django admin</div>
@@ -208,6 +228,16 @@
 <main style="max-width:1280px;margin:0 auto;padding:16px">{% block guest %}{% endblock %}</main>
 {% endif %}
 <script>
+  (function () {
+    document.addEventListener("submit", function (event) {
+      var message = event.target.getAttribute("data-confirm");
+      if (message && !window.confirm(message)) { event.preventDefault(); }
+    });
+    if (window.innerWidth < 860) {
+      var groups = document.querySelectorAll("nav.side details");
+      for (var i = 0; i < groups.length; i++) { groups[i].open = true; }
+    }
+  })();
   (function () {
     var button = document.getElementById("theme-toggle");
     if (!button) { return; }

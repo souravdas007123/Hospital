@@ -10,6 +10,12 @@ from decimal import Decimal
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import (
+    NON_FIELD_ERRORS,
+    FieldDoesNotExist,
+    ObjectDoesNotExist,
+    ValidationError,
+)
 from django.db import models
 from django.db.models import Q
 
@@ -17,7 +23,7 @@ from appointments.models import Appointment
 from doctors.models import Doctor, DoctorSchedule
 from hospitals.models import Bed, Department, Room, Ward
 from ipd.models import IPDAdmission
-from laboratory.models import LabOrder, LabOrderItem, LabTest
+from laboratory.models import LabOrder, LabOrderItem, LabPackage, LabTest
 from opd.models import OPDVisit
 from patients.models import Patient
 
@@ -56,11 +62,133 @@ def portal_formfield(db_field, **kwargs):
 
 
 class PortalForm(forms.ModelForm):
-    """Base for every portal form; remembers the current request."""
+    """Base for every portal form.
+
+    Class options (all optional):
+
+    * ``derive``: ``{"patient": "admission.patient"}`` copies a value from an
+      already chosen field onto the record, so it can never disagree with
+      its parent.
+    * ``readonly_on_edit``: fields that can be chosen when adding a record
+      but are locked afterwards.
+    * ``doctor_user_fields``: user fields restricted to active doctors
+      (the logged-in doctor is pre-selected).
+    """
+
+    derive = {}
+    readonly_on_edit = ()
+    doctor_user_fields = ()
 
     def __init__(self, *args, request=None, **kwargs):
         self.request = request
         super().__init__(*args, **kwargs)
+
+        self._limit_to_active()
+
+        for name in self.readonly_on_edit:
+            if self.instance.pk and name in self.fields:
+                self.fields[name].disabled = True
+
+        for name in self.doctor_user_fields:
+            field = self.fields.get(name)
+            if field is None:
+                continue
+
+            current = getattr(self.instance, f"{name}_id", None)
+            field.queryset = User.objects.filter(
+                _current_or(doctor_users_filter(), current)
+            ).order_by("first_name", "last_name", "username")
+            field.label_from_instance = _user_label
+
+            if (
+                not self.instance.pk
+                and request is not None
+                and getattr(request.user, "role", None) == "DOCTOR"
+            ):
+                # ModelForm.initial (built from the empty instance) wins over
+                # field.initial, so the default has to go in here.
+                self.initial.setdefault(name, request.user.pk)
+
+        self._prefill_from_url()
+
+    def _prefill_from_url(self):
+        """/section/new/?patient=12 pre-selects that value, so row buttons
+        like "Record vitals" can open a form that is already filled in."""
+        request = self.request
+
+        if self.instance.pk or request is None or request.method != "GET":
+            return
+
+        for name in self.fields:
+            if name in request.GET and request.GET[name]:
+                self.initial[name] = request.GET[name]
+
+    def _update_errors(self, errors):
+        # Model.clean() may blame a field that is not on this form (because
+        # the system fills it in). Django would raise ValueError; show it as
+        # a general error instead.
+        if hasattr(errors, "error_dict"):
+            mapped = {}
+            for field, error_list in errors.error_dict.items():
+                target = (
+                    field
+                    if field == NON_FIELD_ERRORS or field in self.fields
+                    else NON_FIELD_ERRORS
+                )
+                mapped.setdefault(target, []).extend(error_list)
+            errors = ValidationError(mapped)
+
+        super()._update_errors(errors)
+
+    def _limit_to_active(self):
+        """Drop-downs only offer active records (plus the one already saved)."""
+        for name, field in self.fields.items():
+            if not isinstance(field, forms.ModelChoiceField):
+                continue
+
+            model = field.queryset.model
+
+            try:
+                model._meta.get_field("is_active")
+            except FieldDoesNotExist:
+                continue
+
+            current = getattr(self.instance, f"{name}_id", None)
+            field.queryset = field.queryset.filter(
+                Q(is_active=True) | Q(pk=current)
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+
+        for target, path in self.derive.items():
+            first, *rest = path.split(".")
+            value = cleaned.get(first)
+
+            for part in rest:
+                if value is None:
+                    break
+                value = getattr(value, part, None)
+
+            if value is not None:
+                setattr(self.instance, target, value)
+
+        return cleaned
+
+    def _post_clean(self):
+        # Model.clean() methods assume their foreign keys are present. When a
+        # required choice is already invalid the user sees that error, so a
+        # crash from the model check would only hide it.
+        try:
+            super()._post_clean()
+        except (ObjectDoesNotExist, AttributeError):
+            if not self.errors:
+                raise
+
+
+def _user_label(user):
+    name = user.get_full_name() or user.get_username()
+    return f"{name} ({user.get_role_display()})"
 
 
 def _current_or(queryset_filter, current_pk):
@@ -217,6 +345,26 @@ class IPDAdmissionForm(PortalForm):
         )
         self.fields["bed"].help_text = "Only available beds are listed."
 
+        # Discharge has its own page (Discharge button); moving a patient
+        # has its own page (Transfer button). Keep this form simple.
+        for name in (
+            "discharge_date", "final_diagnosis", "treatment_summary",
+            "discharge_instructions", "discharge_disposition",
+        ):
+            self.fields.pop(name, None)
+
+        if self.instance.pk:
+            for name in ("patient", "ward", "room", "bed"):
+                self.fields[name].disabled = True
+
+            self.fields["status"].choices = [
+                (IPDAdmission.Status.ADMITTED, "Admitted"),
+                (IPDAdmission.Status.ON_HOLD, "On Hold"),
+                (IPDAdmission.Status.CANCELLED, "Cancelled"),
+            ]
+        else:
+            self.fields.pop("status", None)
+
 
 # ---------------------------------------------------------------------------
 # Laboratory orders (+ test lines)
@@ -224,10 +372,27 @@ class IPDAdmissionForm(PortalForm):
 
 class LabOrderForm(PortalForm):
 
+    package = forms.ModelChoiceField(
+        queryset=LabPackage.objects.none(),
+        required=False,
+        label="Add a package",
+        help_text="Adds every test of the package below.",
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         current = self.instance
+
+        self.fields["package"].queryset = (
+            LabPackage.objects.filter(is_active=True).order_by("name")
+        )
+        self.fields["package"].label_from_instance = (
+            lambda pkg: f"{pkg.name} (₹{pkg.final_price})"
+        )
+
+        if not current.pk:
+            self.fields.pop("status", None)
 
         self.fields["patient"].queryset = Patient.objects.filter(
             _current_or(Q(is_active=True), current.patient_id)
@@ -243,7 +408,7 @@ class LabOrderForm(PortalForm):
             and self.request is not None
             and getattr(self.request.user, "role", None) == "DOCTOR"
         ):
-            self.fields["doctor"].initial = self.request.user.pk
+            self.initial.setdefault("doctor", self.request.user.pk)
 
         self.fields["opd_visit"].queryset = (
             OPDVisit.objects.select_related("patient").order_by("-id")

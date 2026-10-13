@@ -21,6 +21,11 @@ urlpatterns = [
     path("<slug:section>/new/", views.entity_form, name="new"),
     path("<slug:section>/<int:pk>/edit/", views.entity_form, name="edit"),
     path("<slug:section>/<int:pk>/delete/", views.entity_delete, name="delete"),
+    path(
+        "<slug:section>/<int:pk>/do/<slug:action>/",
+        views.entity_action,
+        name="action",
+    ),
     # Must stay last: matches any single slug and 404s for unknown sections.
     path("<slug:section>/", views.entity_list, name="list"),
 ]

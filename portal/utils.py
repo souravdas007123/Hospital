@@ -2,6 +2,9 @@
 
 from datetime import date, datetime, time
 
+from urllib.parse import urlencode
+
+from django.urls import reverse
 from django.utils import timezone
 
 
@@ -99,9 +102,25 @@ def build_cell(obj, accessor, kind=None):
             "badge": "s-stat" if on else "s-routine",
         }
 
-    text = format_value(resolve(obj, accessor))
+    value = resolve(obj, accessor)
+
+    # A column function may return a ready-made cell:
+    # {"text": ..., "badge": ...} for a coloured label, or {"text", "href"}.
+    if isinstance(value, dict):
+        return value
+
+    if value is None and kind == "link":
+        return {"text": "—"}
+
+    text = format_value(value)
 
     if kind == "trunc" and len(text) > 60:
         text = text[:57] + "…"
 
     return {"text": text, "kind": kind}
+
+
+def new_url(section, **params):
+    """Link to a section's "new" page with some fields pre-filled."""
+    url = reverse("portal:new", kwargs={"section": section})
+    return f"{url}?{urlencode(params)}" if params else url

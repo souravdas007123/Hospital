@@ -226,7 +226,13 @@ class MedicineBatch(models.Model):
         ]
 
     def clean(self):
-        if self.expiry_date and self.expiry_date < timezone.localdate():
+        # Only block *new* batches. An existing batch is allowed to be
+        # edited (e.g. deactivated) after it has expired.
+        if (
+            not self.pk
+            and self.expiry_date
+            and self.expiry_date < timezone.localdate()
+        ):
             raise ValidationError(
                 "Expired medicine batch cannot be created."
             )

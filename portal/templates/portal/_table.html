@@ -11,18 +11,29 @@
         <tr>
           {% for cell in row.cells %}
             <td{% if cell.kind == "num" %} class="num"{% elif cell.kind == "mono" %} class="mono"{% endif %}>
-              {% if cell.badge %}<span class="badge {{ cell.badge }}">{{ cell.text }}</span>{% else %}{{ cell.text }}{% endif %}
+              {% if cell.badge %}<span class="badge {{ cell.badge }}">{{ cell.text }}</span>{% elif cell.href %}<a href="{{ cell.href }}" target="_blank" rel="noopener">{{ cell.text }}</a>{% else %}{{ cell.text }}{% endif %}
             </td>
           {% endfor %}
           {% if table.has_actions %}
             <td class="act">
-              {% if row.edit_url %}<a href="{{ row.edit_url }}">Edit</a>{% endif %}
-              {% if row.delete_url %}<a class="del" href="{{ row.delete_url }}">Delete</a>{% endif %}
+              <div class="acts">
+                {% for b in row.buttons %}
+                  {% if b.post %}
+                    <form method="post" action="{{ b.href }}" class="inline"{% if b.confirm %} data-confirm="{{ b.confirm }}"{% endif %}>
+                      {% csrf_token %}<button type="submit" class="rb {{ b.style }}">{{ b.label }}</button>
+                    </form>
+                  {% else %}
+                    <a class="rb {{ b.style }}" href="{{ b.href }}"{% if b.new_tab %} target="_blank" rel="noopener"{% endif %}>{{ b.label }}</a>
+                  {% endif %}
+                {% endfor %}
+                {% if row.edit_url %}<a class="rb" href="{{ row.edit_url }}">Edit</a>{% endif %}
+                {% if row.delete_url %}<a class="rb danger" href="{{ row.delete_url }}">Delete</a>{% endif %}
+              </div>
             </td>
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td class="empty" colspan="{{ table.headers|length }}">{{ empty_text|default:"Nothing to show yet." }}</td></tr>
+        <tr><td class="empty" colspan="{{ table.headers|length|add:1 }}">{{ empty_text|default:"Nothing to show yet." }}</td></tr>
       {% endfor %}
     </tbody>
   </table>

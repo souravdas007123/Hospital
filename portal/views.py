@@ -9,12 +9,13 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError, Q, RestrictedError
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from appointments.models import Appointment
 from hospitals.models import Bed, Hospital
@@ -52,28 +53,79 @@ def list_url(entity):
     return reverse("portal:list", kwargs={"section": entity.key})
 
 
-def make_table(objects, columns, user=None, entity=None):
+def make_table(objects, columns, user=None, entity=None, request=None):
     """columns: list of (label, accessor, kind) tuples."""
     headers = [
         {"label": label, "num": kind == "num"}
         for label, _accessor, kind in columns
     ]
 
-    can_edit = bool(entity and user and user.has_perm(entity.perm("change")))
-    can_delete = bool(entity and user and user.has_perm(entity.perm("delete")))
+    can_edit = bool(
+        entity and user and entity.allow_edit
+        and user.has_perm(entity.perm("change"))
+    )
+    can_delete = bool(
+        entity and user and entity.allow_delete
+        and user.has_perm(entity.perm("delete"))
+    )
+
+    # Row buttons this user may use at all (permission is checked once).
+    actions = []
+    if entity and user:
+        actions = [
+            action for action in entity.actions
+            if user.has_perm(entity.action_perm(action))
+        ]
+
+    def blocked(obj, kind):
+        if entity.guard is None:
+            return False
+        return entity.guard(obj, request, kind) is not None
 
     rows = []
     for obj in objects:
         edit_url = delete_url = None
+        buttons = []
 
-        if can_edit:
+        if can_edit and not blocked(obj, "change"):
             edit_url = reverse(
                 "portal:edit", kwargs={"section": entity.key, "pk": obj.pk}
             )
-        if can_delete:
+        if can_delete and not blocked(obj, "delete"):
             delete_url = reverse(
                 "portal:delete", kwargs={"section": entity.key, "pk": obj.pk}
             )
+
+        for action in actions:
+            if action.visible and not action.visible(obj):
+                continue
+
+            if action.link:
+                buttons.append(
+                    {
+                        "label": action.label,
+                        "href": action.link(obj),
+                        "style": action.style,
+                        "new_tab": action.new_tab,
+                    }
+                )
+            else:
+                buttons.append(
+                    {
+                        "label": action.label,
+                        "href": reverse(
+                            "portal:action",
+                            kwargs={
+                                "section": entity.key,
+                                "pk": obj.pk,
+                                "action": action.key,
+                            },
+                        ),
+                        "style": action.style,
+                        "confirm": action.confirm,
+                        "post": action.form is None,
+                    }
+                )
 
         rows.append(
             {
@@ -83,13 +135,14 @@ def make_table(objects, columns, user=None, entity=None):
                 ],
                 "edit_url": edit_url,
                 "delete_url": delete_url,
+                "buttons": buttons,
             }
         )
 
     return {
         "headers": headers,
         "rows": rows,
-        "has_actions": can_edit or can_delete,
+        "has_actions": can_edit or can_delete or any(r["buttons"] for r in rows),
     }
 
 
@@ -114,7 +167,14 @@ def base_context(request, active):
             and request.user.has_perm(entity.perm("view"))
         ]
         if items:
-            groups.append({"title": group, "items": items})
+            groups.append(
+                {
+                    "title": group,
+                    "items": items,
+                    "open": group == "Clinical"
+                    or any(item["key"] == active for item in items),
+                }
+            )
 
     return {
         "hospital": hospital,
@@ -171,7 +231,7 @@ def entity_list(request, section):
             "title": entity.plural,
             "subtitle": entity.subtitle,
             "table": make_table(
-                page.object_list, entity.columns, request.user, entity
+                page.object_list, entity.columns, request.user, entity, request
             ),
             "page": page,
             "total": paginator.count,
@@ -190,6 +250,10 @@ def entity_list(request, section):
 # Add / edit
 # ---------------------------------------------------------------------------
 
+def edit_url(entity, obj):
+    return reverse("portal:edit", kwargs={"section": entity.key, "pk": obj.pk})
+
+
 @login_required
 def entity_form(request, section, pk=None):
     entity = get_entity(section)
@@ -198,6 +262,13 @@ def entity_form(request, section, pk=None):
 
     action = "change" if obj is not None else "add"
     require(request.user, entity.perm(action))
+
+    if obj is not None and not entity.allow_edit:
+        messages.error(
+            request,
+            f"{entity.plural} are a permanent record and cannot be edited.",
+        )
+        return redirect(list_url(entity))
 
     if obj is not None and entity.guard:
         problem = entity.guard(obj, request, "change")
@@ -213,51 +284,77 @@ def entity_form(request, section, pk=None):
         data, files, instance=obj, request=request
     )
 
-    formset = None
-    if entity.inline:
-        formset_class = entity.inline(extra=2 if obj is not None else 5)
-        formset = formset_class(
-            data, files, instance=form.instance, prefix="lines"
+    formsets = []
+    for inline in entity.inlines:
+        if inline.edit_only and obj is None:
+            continue
+
+        formset_class = inline.factory(extra=2 if obj is not None else 5)
+        formsets.append(
+            {
+                "inline": inline,
+                "formset": formset_class(
+                    data, files, instance=form.instance, prefix=inline.prefix
+                ),
+            }
         )
 
     if is_post:
         form_ok = form.is_valid()
-        formset_ok = formset.is_valid() if formset is not None else True
+        formsets_ok = all(item["formset"].is_valid() for item in formsets)
 
-        if form_ok and formset_ok:
+        if form_ok and formsets_ok:
+            created = obj is None
+
             try:
                 with transaction.atomic():
-                    instance = form.save(commit=False)
+                    if entity.creator and (created or entity.creator_on_edit):
+                        instance = entity.creator(form, request)
+                    else:
+                        instance = form.save(commit=False)
 
-                    if (
-                        obj is None
-                        and hasattr(instance, "created_by_id")
-                        and instance.created_by_id is None
-                    ):
-                        instance.created_by = request.user
+                        if created:
+                            for attr in ("created_by",) + entity.auto_user:
+                                if (
+                                    hasattr(instance, f"{attr}_id")
+                                    and getattr(instance, f"{attr}_id") is None
+                                ):
+                                    setattr(instance, attr, request.user)
 
-                    if entity.before_save:
-                        entity.before_save(instance, request)
+                        if entity.before_save:
+                            entity.before_save(instance, request)
 
-                    instance.save()
-                    form.save_m2m()
+                        instance.save()
+                        form.save_m2m()
 
-                    if formset is not None:
-                        formset.save()
+                        for item in formsets:
+                            item["formset"].save()
 
                     if entity.after_save:
-                        entity.after_save(instance)
+                        entity.after_save(instance, form, request, created)
 
             except ValidationError as exc:
                 # Model-level checks that only run inside save().
                 for message in exc.messages:
                     form.add_error(None, message)
-            else:
-                messages.success(
-                    request,
-                    f"{entity.title} “{instance}” was "
-                    f"{'updated' if obj is not None else 'created'}.",
+            except IntegrityError:
+                form.add_error(
+                    None,
+                    "This record could not be saved because it clashes with "
+                    "an existing one (a duplicate number or code).",
                 )
+            else:
+                verb = "created" if created else "updated"
+                messages.success(
+                    request, f"{entity.title} “{instance}” was {verb}."
+                )
+
+                if created and entity.edit_after_create:
+                    messages.info(
+                        request, "Review the items below, then use the buttons on the list."
+                    )
+                    return redirect(edit_url(entity, instance))
+
                 return redirect(list_url(entity))
 
     context = base_context(request, entity.key)
@@ -265,8 +362,7 @@ def entity_form(request, section, pk=None):
         {
             "entity": entity,
             "form": form,
-            "formset": formset,
-            "inline_title": entity.inline_title,
+            "formsets": formsets,
             "page_title": (
                 f"Edit {entity.title}" if obj is not None
                 else f"New {entity.title}"
@@ -280,6 +376,89 @@ def entity_form(request, section, pk=None):
 
 
 # ---------------------------------------------------------------------------
+# Row buttons (check-in, receive stock, dispense ...)
+# ---------------------------------------------------------------------------
+
+def safe_next(request, fallback):
+    target = request.POST.get("next") or request.GET.get("next")
+
+    if target and url_has_allowed_host_and_scheme(
+        target, allowed_hosts={request.get_host()}
+    ):
+        return target
+
+    return fallback
+
+
+@login_required
+def entity_action(request, section, pk, action):
+    entity = get_entity(section)
+
+    spec = next(
+        (a for a in entity.actions if a.key == action and a.run), None
+    )
+    if spec is None:
+        raise Http404("Unknown action.")
+
+    require(request.user, entity.action_perm(spec))
+
+    obj = get_object_or_404(entity.queryset(), pk=pk)
+    back = safe_next(request, list_url(entity))
+
+    if spec.visible and not spec.visible(obj):
+        messages.error(request, "That action is not available for this record right now.")
+        return redirect(back)
+
+    form = None
+
+    if spec.form is not None:
+        form = spec.form(request.POST or None)
+
+        if request.method == "POST" and form.is_valid():
+            data = form.cleaned_data
+        else:
+            return render_action_form(request, entity, spec, obj, form, back)
+    else:
+        if request.method != "POST":
+            return redirect(back)
+        data = None
+
+    try:
+        with transaction.atomic():
+            if form is not None:
+                message = spec.run(obj, request, data)
+            else:
+                message = spec.run(obj, request)
+    except ValidationError as exc:
+        text = " ".join(exc.messages)
+
+        if form is not None:
+            form.add_error(None, text)
+            return render_action_form(request, entity, spec, obj, form, back)
+
+        messages.error(request, text)
+    else:
+        messages.success(request, message)
+
+    return redirect(back)
+
+
+def render_action_form(request, entity, spec, obj, form, back):
+    context = base_context(request, entity.key)
+    context.update(
+        {
+            "entity": entity,
+            "action": spec,
+            "object": obj,
+            "form": form,
+            "cancel_url": back,
+            "next": back,
+        }
+    )
+    return render(request, "portal/action_form.html", context)
+
+
+# ---------------------------------------------------------------------------
 # Delete
 # ---------------------------------------------------------------------------
 
@@ -289,6 +468,13 @@ def entity_delete(request, section, pk):
     obj = get_object_or_404(entity.model, pk=pk)
 
     require(request.user, entity.perm("delete"))
+
+    if not entity.allow_delete:
+        messages.error(
+            request,
+            f"{entity.plural} are a permanent record and cannot be deleted.",
+        )
+        return redirect(list_url(entity))
 
     if entity.guard:
         problem = entity.guard(obj, request, "delete")
@@ -300,7 +486,8 @@ def entity_delete(request, section, pk):
         label = str(obj)
 
         try:
-            obj.delete()
+            with transaction.atomic():
+                obj.delete()
         except (ProtectedError, RestrictedError):
             messages.error(
                 request,
