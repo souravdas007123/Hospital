@@ -1,0 +1,26 @@
+<div class="table-wrap">
+  <table class="data">
+    <thead>
+      <tr>
+        {% for h in table.headers %}<th{% if h.num %} class="num"{% endif %}>{{ h.label }}</th>{% endfor %}
+        {% if table.has_links %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in table.rows %}
+        <tr>
+          {% for cell in row.cells %}
+            <td{% if cell.kind == "num" %} class="num"{% elif cell.kind == "mono" %} class="mono"{% endif %}>
+              {% if cell.badge %}<span class="badge {{ cell.badge }}">{{ cell.text }}</span>{% else %}{{ cell.text }}{% endif %}
+            </td>
+          {% endfor %}
+          {% if table.has_links %}
+            <td class="act">{% if row.url %}<a href="{{ row.url }}">Open</a>{% endif %}</td>
+          {% endif %}
+        </tr>
+      {% empty %}
+        <tr><td class="empty" colspan="{{ table.headers|length }}">{{ empty_text|default:"Nothing to show yet." }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

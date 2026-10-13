@@ -50,8 +50,14 @@ INSTALLED_APPS = [
     "pharmacy.apps.PharmacyConfig",
     "billing",
     "insurance",
+    "portal.apps.PortalConfig",
 ]
 AUTH_USER_MODEL = "accounts.User"
+
+# Portal login flow (also used by @login_required views such as lab report print)
+LOGIN_URL = "portal:login"
+LOGIN_REDIRECT_URL = "portal:dashboard"
+LOGOUT_REDIRECT_URL = "portal:login"
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

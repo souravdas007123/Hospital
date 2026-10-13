@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Dashboard{% endblock %} · {{ hospital_name|default:"Hospital Management" }}</title>
+<style>
+  /* Same design tokens as the Billing app so both feel like one product. */
+  :root {
+    --bg:#f4f5f7; --card:#fff; --ink:#1d2330; --muted:#667085; --line:#d9dde5;
+    --brand:#1f5eff; --brand-ink:#fff; --brand-soft:#eaf0ff;
+    --bad:#c0262d; --ok:#117a3d; --warn:#b45309; --out:#f1f4fb;
+    --bad-soft:#fdecec; --ok-soft:#e7f6ed; --warn-soft:#fff4e0; --info-soft:#eaf0ff; --violet:#5b3fd1; --violet-soft:#eeebfc; --grey-soft:#eef0f4;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  a { color:var(--brand); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  header.top { background:#fff; border-bottom:1px solid var(--line); padding:0 16px; display:flex; align-items:center; gap:14px; height:48px; position:sticky; top:0; z-index:5; }
+  header.top .brand { display:flex; align-items:center; gap:10px; font-weight:700; color:var(--ink); text-decoration:none; }
+  header.top .brand:hover { text-decoration:none; color:var(--brand); }
+  .mark { width:26px; height:26px; border-radius:6px; background:var(--brand); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:18px; line-height:1; }
+  .brand img { width:26px; height:26px; object-fit:contain; border-radius:6px; }
+  header.top .sp { flex:1; }
+  header.top form { margin:0; }
+  header.top .who { text-align:right; line-height:1.2; }
+  header.top .who small { display:block; color:var(--muted); font-size:11px; }
+
+  .shell { display:flex; align-items:flex-start; min-height:calc(100vh - 48px); }
+  nav.side { width:220px; flex:none; background:#fff; border-right:1px solid var(--line); padding:12px 10px; position:sticky; top:48px; min-height:calc(100vh - 48px); }
+  nav.side .label { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:8px 10px 4px; }
+  nav.side a { display:block; padding:8px 10px; border-radius:6px; color:var(--ink); font-weight:600; text-decoration:none; margin-bottom:2px; }
+  nav.side a:hover { background:var(--out); }
+  nav.side a.active { background:var(--brand-soft); color:var(--brand); }
+  nav.side hr { border:0; border-top:1px solid var(--line); margin:10px 0; }
+
+  main { flex:1; min-width:0; max-width:1280px; padding:16px 20px 40px; }
+  .page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  h1 { margin:0; font-size:20px; }
+  h2,h3 { margin:0 0 10px; }
+  .muted { color:var(--muted); }
+
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .card.flush { padding:0; overflow:hidden; }
+  .card h3 { font-size:14px; }
+
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  input, select, textarea { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; color:var(--ink); background:#fff; }
+  input:focus, select:focus, textarea:focus { outline:2px solid #b8ccff; border-color:var(--brand); }
+  button, .btn { display:inline-block; padding:8px 14px; border:1px solid var(--line); background:#fff; border-radius:6px; font:inherit; font-weight:600; cursor:pointer; color:var(--ink); text-decoration:none; }
+  button:hover, .btn:hover { text-decoration:none; background:var(--out); }
+  button.primary, .btn.primary { background:var(--brand); border-color:var(--brand); color:var(--brand-ink); }
+  button.primary:hover, .btn.primary:hover { background:#1a52e0; }
+  .btn.disabled { opacity:.5; pointer-events:none; }
+
+  .msg { padding:10px 12px; border-radius:6px; margin-bottom:12px; background:var(--bad-soft); color:var(--bad); border:1px solid #f5c2c4; }
+
+  /* stat tiles */
+  .stats { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:12px; margin-bottom:16px; }
+  .stat { display:block; color:var(--ink); text-decoration:none; }
+  a.stat:hover { border-color:var(--brand); text-decoration:none; }
+  .stat .k { font-size:12px; color:var(--muted); font-weight:600; }
+  .stat .v { font-size:28px; font-weight:700; margin:4px 0 2px; font-variant-numeric:tabular-nums; }
+  .stat .n { font-size:12px; color:var(--muted); }
+
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:12px; }
+  .card .head { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); }
+  .card .head h3 { margin:0; }
+
+  /* toolbar */
+  .toolbar { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
+  .toolbar .f { flex:1; min-width:220px; }
+  .toolbar .f.sel { flex:none; width:200px; min-width:160px; }
+  .toolbar label { margin:0 0 4px; }
+
+  /* tables */
+  .table-wrap { overflow-x:auto; }
+  table.data { border-collapse:collapse; width:100%; }
+  table.data th { text-align:left; font-size:12px; color:var(--muted); font-weight:600; padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap; background:#fafbfc; }
+  table.data td { padding:9px 12px; border-bottom:1px solid #eef0f4; vertical-align:middle; }
+  table.data tbody tr:hover { background:#fafbff; }
+  table.data tbody tr:last-child td { border-bottom:0; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+  td.act { text-align:right; white-space:nowrap; }
+  td.empty { text-align:center; color:var(--muted); padding:36px 12px; }
+
+  /* badges */
+  .badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; background:var(--grey-soft); color:var(--muted); }
+  .s-booked, .s-confirmed, .s-ordered, .s-sample_pending, .s-vitals_completed { background:var(--info-soft); color:var(--brand); }
+  .s-waiting, .s-checked_in, .s-on_hold, .s-partial, .s-sample_collected, .s-stat { background:var(--warn-soft); color:var(--warn); }
+  .s-in_consultation, .s-processing, .s-admitted { background:var(--violet-soft); color:var(--violet); }
+  .s-completed, .s-consultation_completed, .s-discharged, .s-active { background:var(--ok-soft); color:var(--ok); }
+  .s-cancelled, .s-no_show { background:var(--bad-soft); color:var(--bad); }
+  .s-draft, .s-referred, .s-inactive, .s-routine { background:var(--grey-soft); color:var(--muted); }
+
+  /* pagination */
+  .pager { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-top:1px solid var(--line); flex-wrap:wrap; }
+  .pager .btns { display:flex; gap:8px; }
+
+  @media (max-width: 860px) {
+    .shell { display:block; }
+    nav.side { width:auto; min-height:0; position:static; display:flex; gap:6px; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line); padding:8px; }
+    nav.side .label, nav.side hr { display:none; }
+    nav.side a { white-space:nowrap; margin:0; }
+    main { padding:12px; }
+    .grid2 { grid-template-columns:1fr; }
+    header.top .who small { display:none; }
+  }
+  @media print { header.top, nav.side, .toolbar, .pager { display:none; } body { background:#fff; } .shell { display:block; } }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+{% if user.is_authenticated %}
+<header class="top">
+  <a class="brand" href="{% url 'portal:dashboard' %}">
+    {% if hospital and hospital.logo %}<img src="{{ hospital.logo.url }}" alt="">{% else %}<span class="mark">+</span>{% endif %}
+    <span>{{ hospital_name }}</span>
+  </a>
+  <span class="sp"></span>
+  <div class="who">
+    {{ user.get_full_name|default:user.get_username }}
+    <small>{{ user.get_role_display }}</small>
+  </div>
+  <form method="post" action="{% url 'portal:logout' %}">{% csrf_token %}<button type="submit">Logout</button></form>
+</header>
+<div class="shell">
+  <nav class="side">
+    <div class="label">Menu</div>
+    {% for item in nav %}
+      <a href="{{ item.url }}"{% if item.key == active %} class="active"{% endif %}>{{ item.label }}</a>
+    {% endfor %}
+    {% if user.is_staff %}
+      <hr>
+      <div class="label">Administration</div>
+      <a href="{% url 'admin:index' %}">Admin panel</a>
+    {% endif %}
+  </nav>
+  <main>{% block content %}{% endblock %}</main>
+</div>
+{% else %}
+<main style="max-width:1280px;margin:0 auto;padding:16px">{% block guest %}{% endblock %}</main>
+{% endif %}
+</body>
+</html>

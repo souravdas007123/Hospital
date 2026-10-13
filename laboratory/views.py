@@ -52,20 +52,20 @@ def lab_report_print(request, pk):
 
     patient_age = None
 
-    if report.patient.dob:
+    if report.patient.date_of_birth:
 
         today = timezone.localdate()
 
         patient_age = (
             today.year
-            - report.patient.dob.year
+            - report.patient.date_of_birth.year
         )
 
         if (
             (today.month, today.day)
             < (
-                report.patient.dob.month,
-                report.patient.dob.day,
+                report.patient.date_of_birth.month,
+                report.patient.date_of_birth.day,
             )
         ):
             patient_age -= 1
