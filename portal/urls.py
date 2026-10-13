@@ -18,6 +18,7 @@ urlpatterns = [
         name="login",
     ),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("lookup/<slug:key>/", views.lookup, name="lookup"),
     path("<slug:section>/new/", views.entity_form, name="new"),
     path("<slug:section>/<int:pk>/edit/", views.entity_form, name="edit"),
     path("<slug:section>/<int:pk>/delete/", views.entity_delete, name="delete"),

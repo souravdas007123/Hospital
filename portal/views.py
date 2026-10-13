@@ -10,8 +10,19 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import ProtectedError, Q, RestrictedError
-from django.http import Http404
+from datetime import timedelta
+
+from django.db.models import (
+    DecimalField,
+    F,
+    ProtectedError,
+    Q,
+    RestrictedError,
+    Sum,
+    Value,
+)
+from django.db.models.functions import Coalesce
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -20,10 +31,12 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from appointments.models import Appointment
 from hospitals.models import Bed, Hospital
 from ipd.models import IPDAdmission
-from laboratory.models import LabOrder
+from laboratory.models import LabOrder, LabResult, LabSample
 from opd.models import OPDVisit
 from patients.models import Patient
+from pharmacy.models import Medicine, MedicineBatch, Prescription
 
+from .lookups import LOOKUPS, search as lookup_search
 from .registry import ENTITIES, GROUP_ORDER
 from .utils import build_cell, doctor_profile_name, person_name
 
@@ -176,7 +189,14 @@ def base_context(request, active):
                 }
             )
 
+    patient_search_url = (
+        reverse("portal:list", kwargs={"section": "patients"})
+        if request.user.has_perm("patients.view_patient")
+        else None
+    )
+
     return {
+        "patient_search_url": patient_search_url,
         "hospital": hospital,
         "hospital_name": hospital.name if hospital else "Hospital Management",
         "nav_groups": groups,
@@ -512,6 +532,20 @@ def entity_delete(request, section, pk):
 
 
 # ---------------------------------------------------------------------------
+# Type-ahead search used by patient / medicine drop-downs
+# ---------------------------------------------------------------------------
+
+@login_required
+def lookup(request, key):
+    if key not in LOOKUPS:
+        raise Http404("Unknown lookup.")
+
+    query = request.GET.get("q", "").strip()[:60]
+
+    return JsonResponse({"results": lookup_search(key, query)})
+
+
+# ---------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------
 
@@ -643,6 +677,78 @@ def dashboard(request):
                 "url": reverse("portal:list", kwargs={"section": "lab-orders"}),
             }
         )
+
+    # --- things that need attention -------------------------------------
+    def attention(label, value, note, section, filter_value=None):
+        url = reverse("portal:list", kwargs={"section": section})
+        if filter_value:
+            url += f"?filter={filter_value}"
+        stats.append(
+            {"label": label, "value": value, "note": note, "url": url}
+        )
+
+    if user.has_perm("laboratory.view_labsample"):
+        pending = LabSample.objects.filter(status=LabSample.Status.PENDING).count()
+        collected = LabSample.objects.filter(status=LabSample.Status.COLLECTED).count()
+        attention(
+            "Samples to collect", pending, f"{collected} collected, not yet received",
+            "lab-samples", "PENDING",
+        )
+
+    if user.has_perm("laboratory.view_labresult"):
+        attention(
+            "Results to verify",
+            LabResult.objects.filter(status=LabResult.ResultStatus.ENTERED).count(),
+            "entered, waiting for a second check",
+            "lab-results", "ENTERED",
+        )
+
+    if user.has_perm("pharmacy.view_prescription"):
+        attention(
+            "Prescriptions to dispense",
+            Prescription.objects.filter(
+                status__in=[
+                    Prescription.Status.ACTIVE,
+                    Prescription.Status.PARTIALLY_DISPENSED,
+                ]
+            ).count(),
+            "waiting at the pharmacy",
+            "prescriptions", "ACTIVE",
+        )
+
+    if user.has_perm("pharmacy.view_medicinebatch"):
+        soon = today + timedelta(days=30)
+        expiring = MedicineBatch.objects.filter(
+            is_active=True,
+            available_quantity__gt=0,
+            expiry_date__lte=soon,
+        )
+        attention(
+            "Batches expiring soon",
+            expiring.filter(expiry_date__gte=today).count(),
+            f"{expiring.filter(expiry_date__lt=today).count()} already expired, still in stock",
+            "stock",
+        )
+
+    if user.has_perm("pharmacy.view_medicine"):
+        low = (
+            Medicine.objects.filter(is_active=True, reorder_level__gt=0)
+            .annotate(
+                stock=Coalesce(
+                    Sum(
+                        "batches__available_quantity",
+                        filter=Q(
+                            batches__is_active=True,
+                            batches__expiry_date__gte=today,
+                        ),
+                    ),
+                    Value(0, output_field=DecimalField()),
+                )
+            )
+            .filter(stock__lte=F("reorder_level"))
+            .count()
+        )
+        attention("Low-stock medicines", low, "at or below reorder level", "medicines")
 
     quick_actions = [
         {

@@ -27,7 +27,9 @@ from laboratory.models import LabOrder, LabOrderItem, LabPackage, LabTest
 from opd.models import OPDVisit
 from patients.models import Patient
 
+from .lookups import BY_MODEL
 from .utils import WEEKDAYS
+from .widgets import LookupSelect
 
 
 User = get_user_model()
@@ -84,6 +86,7 @@ class PortalForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
         self._limit_to_active()
+        _use_type_ahead(self.fields)
 
         for name in self.readonly_on_edit:
             if self.instance.pk and name in self.fields:
@@ -184,6 +187,24 @@ class PortalForm(forms.ModelForm):
         except (ObjectDoesNotExist, AttributeError):
             if not self.errors:
                 raise
+
+
+def _use_type_ahead(fields):
+    """Patient and medicine drop-downs become search-as-you-type boxes."""
+    for field in fields.values():
+        if not isinstance(field, forms.ModelChoiceField):
+            continue
+        if isinstance(field, forms.ModelMultipleChoiceField):
+            continue
+
+        key = BY_MODEL.get(field.queryset.model)
+        if key is None or field.disabled:
+            continue
+
+        widget = LookupSelect(key)
+        widget.is_required = field.required
+        field.widget = widget
+        widget.choices = field.choices
 
 
 def _user_label(user):
@@ -391,8 +412,8 @@ class LabOrderForm(PortalForm):
             lambda pkg: f"{pkg.name} (₹{pkg.final_price})"
         )
 
-        if not current.pk:
-            self.fields.pop("status", None)
+        # Status is managed by the system (samples, results, cancel button).
+        self.fields.pop("status", None)
 
         self.fields["patient"].queryset = Patient.objects.filter(
             _current_or(Q(is_active=True), current.patient_id)

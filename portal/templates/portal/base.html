@@ -122,6 +122,9 @@
   td.act { text-align:right; }
   td.act .acts { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   form.inline { display:inline; margin:0; }
+  .lookup-box { margin-bottom:4px; }
+  header.top form.quick-search { margin:0 0 0 16px; }
+  header.top form.quick-search input { width:240px; padding:5px 10px; }
   .rb { display:inline-block; padding:3px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; font-weight:600; line-height:1.5; background:var(--card); color:var(--ink); cursor:pointer; text-decoration:none; white-space:nowrap; }
   .rb:hover { background:var(--out); text-decoration:none; }
   .rb.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
@@ -191,6 +194,11 @@
     {% if hospital and hospital.logo %}<img src="{{ hospital.logo.url }}" alt="">{% else %}<span class="mark">+</span>{% endif %}
     <span>{{ hospital_name }}</span>
   </a>
+  {% if patient_search_url %}
+    <form class="quick-search" method="get" action="{{ patient_search_url }}">
+      <input type="search" name="q" placeholder="Find patient: name, UHID, phone…" aria-label="Find patient">
+    </form>
+  {% endif %}
   <span class="sp"></span>
   <button type="button" class="icon" id="theme-toggle" title="Switch light / dark theme" aria-label="Switch light / dark theme">☾</button>
   <div class="who">
@@ -228,6 +236,75 @@
 <main style="max-width:1280px;margin:0 auto;padding:16px">{% block guest %}{% endblock %}</main>
 {% endif %}
 <script>
+  (function () {
+    /* Type-ahead for patient / medicine pick-lists. */
+    function setup(select) {
+      if (select.disabled) { return; }
+      var url = select.getAttribute("data-lookup");
+      var box = document.createElement("input");
+      box.type = "search";
+      box.className = "lookup-box";
+      box.placeholder = "Type name, number or phone to search…";
+      box.autocomplete = "off";
+      select.parentNode.insertBefore(box, select);
+
+      var timer = null, sequence = 0, enterPressed = false;
+
+      function load() {
+        var mine = ++sequence;
+        fetch(url + "?q=" + encodeURIComponent(box.value), { credentials: "same-origin" })
+          .then(function (response) { return response.json(); })
+          .then(function (data) {
+            if (mine !== sequence) { return; }
+            var keepValue = select.value;
+            var keepText = select.selectedIndex >= 0 ? select.options[select.selectedIndex].text : "";
+            var results = data.results || [];
+
+            select.innerHTML = "";
+            var empty = document.createElement("option");
+            empty.value = "";
+            empty.text = results.length ? "— choose (" + results.length + " found) —" : "No match";
+            select.appendChild(empty);
+
+            var seen = false;
+            results.forEach(function (item) {
+              var option = document.createElement("option");
+              option.value = item.id;
+              option.text = item.text;
+              if (String(item.id) === keepValue) { option.selected = true; seen = true; }
+              select.appendChild(option);
+            });
+
+            if (keepValue && !seen) {
+              var kept = document.createElement("option");
+              kept.value = keepValue;
+              kept.text = keepText;
+              kept.selected = true;
+              select.insertBefore(kept, select.children[1] || null);
+            }
+
+            if (enterPressed && results.length === 1) { select.value = String(results[0].id); }
+            enterPressed = false;
+          });
+      }
+
+      box.addEventListener("input", function () {
+        clearTimeout(timer);
+        timer = setTimeout(load, 200);
+      });
+      box.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          enterPressed = true;
+          clearTimeout(timer);
+          load();
+        }
+      });
+    }
+
+    var lookups = document.querySelectorAll("select[data-lookup]");
+    for (var i = 0; i < lookups.length; i++) { setup(lookups[i]); }
+  })();
   (function () {
     document.addEventListener("submit", function (event) {
       var message = event.target.getAttribute("data-confirm");

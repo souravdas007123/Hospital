@@ -31,7 +31,7 @@ from pharmacy.models import (
     PrescriptionItem,
 )
 
-from .forms import PortalForm, portal_formfield
+from .forms import PortalForm, _use_type_ahead, portal_formfield
 
 
 ACTIVE_ADMISSION = ("ADMITTED", "ON_HOLD")
@@ -79,6 +79,7 @@ class LineForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         PortalForm._limit_to_active(self)
+        _use_type_ahead(self.fields)
 
 
 class ParentAwareFormSet(forms.BaseInlineFormSet):
@@ -447,6 +448,20 @@ class LabResultForm(PortalForm):
 
         if self.instance.pk:
             field.disabled = True
+
+    def clean(self):
+        cleaned = super().clean()
+
+        if (
+            "sample" in cleaned
+            and not cleaned.get("result_value")
+            and cleaned.get("numeric_value") is None
+        ):
+            self.add_error(
+                "numeric_value", "Enter the result value (number or text)."
+            )
+
+        return cleaned
 
 
 class LabReportForm(PortalForm):
