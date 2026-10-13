@@ -1,0 +1,23 @@
+{% extends "portal/base.html" %}
+{% block title %}Login{% endblock %}
+{% block guest %}
+<div class="card" style="max-width:380px;margin:70px auto">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <span class="mark">+</span>
+    <div>
+      <h2 style="margin:0">Hospital Management</h2>
+      <div class="muted">Sign in to continue</div>
+    </div>
+  </div>
+
+  {% if form.errors %}<div class="msg">Username ya password galat hai.</div>{% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <label>Username {{ form.username }}</label>
+    <label>Password {{ form.password }}</label>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="primary" type="submit" style="width:100%;margin-top:4px">Login</button>
+  </form>
+</div>
+{% endblock %}

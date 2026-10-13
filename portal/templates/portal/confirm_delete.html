@@ -1,0 +1,19 @@
+{% extends "portal/base.html" %}
+{% block title %}Delete {{ entity.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Delete {{ entity.title }}</h1>
+</div>
+
+<div class="card" style="max-width:560px">
+  <p style="margin-top:0">Are you sure you want to delete <strong>{{ object }}</strong>?</p>
+  <p class="muted">This cannot be undone, and records linked to it may be removed too.
+    If you only want to stop using it, edit it and mark it inactive instead.</p>
+
+  <form method="post" class="form-actions" style="border-top:0;padding-top:0">
+    {% csrf_token %}
+    <button class="danger" type="submit">Yes, delete</button>
+    <a class="btn" href="{{ cancel_url }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

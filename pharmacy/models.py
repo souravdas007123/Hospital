@@ -226,7 +226,13 @@ class MedicineBatch(models.Model):
         ]
 
     def clean(self):
-        if self.expiry_date and self.expiry_date < timezone.localdate():
+        # Only block *new* batches. An existing batch is allowed to be
+        # edited (e.g. deactivated) after it has expired.
+        if (
+            not self.pk
+            and self.expiry_date
+            and self.expiry_date < timezone.localdate()
+        ):
             raise ValidationError(
                 "Expired medicine batch cannot be created."
             )
@@ -1037,7 +1043,9 @@ class PharmacyDispensingItem(models.Model):
                     "Medicine batch must match prescription medicine."
                 )
 
-        if self.medicine_batch_id:
+        # Once stock has been deducted, available_quantity already excludes
+        # this item, so comparing against it again would wrongly fail.
+        if self.medicine_batch_id and not self.stock_applied:
             if self.medicine_batch.is_expired:
                 raise ValidationError(
                     f"Batch {self.medicine_batch.batch_number} is expired."

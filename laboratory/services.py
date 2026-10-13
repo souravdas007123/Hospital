@@ -441,21 +441,21 @@ def calculate_patient_age(patient):
     Returns patient's age in years.
     """
 
-    if not patient.dob:
+    if not patient.date_of_birth:
         return Decimal("0")
 
     today = timezone.localdate()
 
     age = (
         today.year
-        - patient.dob.year
+        - patient.date_of_birth.year
     )
 
     if (
         (today.month, today.day)
         < (
-            patient.dob.month,
-            patient.dob.day,
+            patient.date_of_birth.month,
+            patient.date_of_birth.day,
         )
     ):
         age -= 1
