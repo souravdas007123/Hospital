@@ -149,8 +149,8 @@ class IPDAdmissionAdmin(admin.ModelAdmin):
         "doctor__username",
         "doctor__first_name",
         "doctor__last_name",
-        "bed__name",
-        "room__name",
+        "bed__bed_number",
+        "room__room_number",
         "ward__name",
     )
 
@@ -577,8 +577,8 @@ class IPDBedTransferAdmin(admin.ModelAdmin):
         "patient__first_name",
         "patient__last_name",
         "patient__phone",
-        "from_bed__name",
-        "to_bed__name",
+        "from_bed__bed_number",
+        "to_bed__bed_number",
     )
 
     autocomplete_fields = (
