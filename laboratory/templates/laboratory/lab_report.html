@@ -382,8 +382,12 @@
 
                     <div class="hospital-address">
 
-                        {% if hospital.address %}
-                            {{ hospital.address }}
+                        {% if hospital.address_line_1 %}
+                            {{ hospital.address_line_1 }}
+                        {% endif %}
+
+                        {% if hospital.address_line_2 %}
+                            , {{ hospital.address_line_2 }}
                         {% endif %}
 
                         {% if hospital.city %}
@@ -584,8 +588,8 @@
 
                 <td class="patient-value">
 
-                    {% if patient.dob %}
-                        {{ patient.dob|date:"d-m-Y" }}
+                    {% if patient.date_of_birth %}
+                        {{ patient.date_of_birth|date:"d-m-Y" }}
                     {% else %}
                         -
                     {% endif %}
@@ -617,7 +621,7 @@
                 </td>
 
                 <td class="patient-value">
-                    {{ patient.address|default:"-" }}
+                    {% if patient.address_line_1 %}{{ patient.address_line_1 }}{% if patient.address_line_2 %}, {{ patient.address_line_2 }}{% endif %}{% if patient.city %}, {{ patient.city }}{% endif %}{% else %}-{% endif %}
                 </td>
 
             </tr>

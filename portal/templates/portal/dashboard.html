@@ -1,0 +1,57 @@
+{% extends "portal/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Welcome, {{ display_name }}</h1>
+    <div class="muted">{{ today|date:"l, d F Y" }}</div>
+  </div>
+</div>
+
+{% if stats %}
+  <div class="stats">
+    {% for s in stats %}
+      {% if s.url %}
+        <a class="card stat" href="{{ s.url }}">
+          <div class="k">{{ s.label }}</div>
+          <div class="v">{{ s.value }}</div>
+          <div class="n">{{ s.note }}</div>
+        </a>
+      {% else %}
+        <div class="card stat">
+          <div class="k">{{ s.label }}</div>
+          <div class="v">{{ s.value }}</div>
+          <div class="n">{{ s.note }}</div>
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card">
+    <h3>No sections assigned yet</h3>
+    <div class="muted">Your role does not have access to any hospital modules. Please contact the administrator.</div>
+  </div>
+{% endif %}
+
+<div class="grid2">
+  {% if appointments_table %}
+    <div class="card flush">
+      <div class="head">
+        <h3>Today's appointments</h3>
+        <a href="{% url 'portal:list' section='appointments' %}">View all</a>
+      </div>
+      {% include "portal/_table.html" with table=appointments_table empty_text="No appointments scheduled for today." %}
+    </div>
+  {% endif %}
+
+  {% if admissions_table %}
+    <div class="card flush">
+      <div class="head">
+        <h3>Currently admitted</h3>
+        <a href="{% url 'portal:list' section='ipd' %}">View all</a>
+      </div>
+      {% include "portal/_table.html" with table=admissions_table empty_text="No patients are admitted right now." %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

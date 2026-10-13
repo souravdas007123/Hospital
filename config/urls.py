@@ -11,6 +11,10 @@ urlpatterns = [
         "laboratory/",
         include("laboratory.urls"),
     ),
+
+    # Portal (dashboard + list pages) lives at the site root; keep it last
+    # because its "<section>/" pattern matches any single path segment.
+    path("", include("portal.urls")),
 ]
 
 
