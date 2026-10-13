@@ -96,11 +96,10 @@ def process_pharmacy_purchase(purchase, user=None):
             batch.save()
 
         StockTransaction.objects.create(
-            medicine=item.medicine,
             medicine_batch=batch,
             transaction_type=StockTransaction.TransactionType.PURCHASE,
             quantity=item.quantity_received,
-            reference=purchase.grn_number,
+            reference_number=purchase.grn_number,
             notes=f"Stock received through GRN {purchase.grn_number}",
             created_by=user or purchase.received_by,
         )
@@ -266,21 +265,20 @@ def process_pharmacy_purchase_return(
         if batch.available_quantity == 0:
             batch.is_active = False
 
-        batch.save(
-            update_fields=[
-                "available_quantity",
-                "is_active",
-            ]
+        # queryset.update() skips MedicineBatch.save() -> full_clean(), which
+        # rejects expired batches. Expired stock must still be returnable.
+        MedicineBatch.objects.filter(pk=batch.pk).update(
+            available_quantity=batch.available_quantity,
+            is_active=batch.is_active,
         )
 
         StockTransaction.objects.create(
-            medicine=item.medicine,
             medicine_batch=batch,
             transaction_type=(
                 StockTransaction.TransactionType.RETURN
             ),
             quantity=-item.quantity_returned,
-            reference=purchase_return.return_number,
+            reference_number=purchase_return.return_number,
             notes=(
                 f"Supplier purchase return "
                 f"{purchase_return.return_number}"
@@ -336,23 +334,12 @@ def get_fefo_batches(
             medicine=medicine,
             is_active=True,
             available_quantity__gt=0,
-        )
-        .filter(
-            expiry_date__isnull=True
-        )
-        | MedicineBatch.objects
-        .select_for_update()
-        .filter(
-            medicine=medicine,
-            is_active=True,
-            available_quantity__gt=0,
             expiry_date__gte=today,
         )
-    )
-
-    batches = batches.order_by(
-        "expiry_date",
-        "id",
+        .order_by(
+            "expiry_date",
+            "id",
+        )
     )
 
     total_available = sum(
@@ -502,7 +489,7 @@ def process_pharmacy_dispensing(dispensing):
         )
 
         prescribed_quantity = (
-            prescription_item.quantity
+            prescription_item.quantity_prescribed
         )
 
         if (
@@ -582,13 +569,12 @@ def process_pharmacy_dispensing(dispensing):
             )
 
             StockTransaction.objects.create(
-                medicine=medicine,
                 medicine_batch=batch,
                 transaction_type=(
                     StockTransaction.TransactionType.DISPENSE
                 ),
                 quantity=-quantity,
-                reference=dispensing.dispensing_number,
+                reference_number=dispensing.dispensing_number,
                 notes=(
                     f"Medicine dispensed through "
                     f"{dispensing.dispensing_number}"
@@ -612,18 +598,43 @@ def process_pharmacy_dispensing(dispensing):
         if not item.medicine_batch_id and batches:
             item.medicine_batch = batches[0]["batch"]
 
+        # An auto-allocated (FEFO) item has no price yet; take it from the
+        # batch and store it, otherwise the bill would show 0.
+        if not item.selling_price and item.medicine_batch_id:
+            item.selling_price = item.medicine_batch.selling_price
+
         item.stock_applied = True
 
         item.save(
             update_fields=[
                 "medicine_batch",
+                "selling_price",
                 "stock_applied",
             ]
         )
 
-    update_prescription_status(
-        dispensing.prescription
+    prescription = dispensing.prescription
+
+    update_prescription_status(prescription)
+
+    # The dispensing record follows the prescription: either everything has
+    # been handed over, or only part of it so far.
+    new_status = (
+        PharmacyDispensing.Status.DISPENSED
+        if prescription.status == Prescription.Status.DISPENSED
+        else PharmacyDispensing.Status.PARTIALLY_DISPENSED
     )
+
+    if dispensing.status != new_status or not dispensing.dispensed_at:
+        dispensing.status = new_status
+        dispensing.dispensed_at = dispensing.dispensed_at or timezone.now()
+        dispensing.save(
+            update_fields=[
+                "status",
+                "dispensed_at",
+                "updated_at",
+            ]
+        )
 
     return dispensing
 
@@ -645,8 +656,9 @@ def update_prescription_status(prescription):
         return
 
     total_prescribed = sum(
-        item.quantity
+        item.quantity_prescribed
         for item in items
+        if not item.is_discontinued
     )
 
     total_dispensed = (

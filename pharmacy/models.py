@@ -1037,7 +1037,9 @@ class PharmacyDispensingItem(models.Model):
                     "Medicine batch must match prescription medicine."
                 )
 
-        if self.medicine_batch_id:
+        # Once stock has been deducted, available_quantity already excludes
+        # this item, so comparing against it again would wrongly fail.
+        if self.medicine_batch_id and not self.stock_applied:
             if self.medicine_batch.is_expired:
                 raise ValidationError(
                     f"Batch {self.medicine_batch.batch_number} is expired."
